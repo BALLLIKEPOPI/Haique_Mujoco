@@ -1,0 +1,54 @@
+<mujoco model="CF2 scene">
+  <include file="../../robots/haique.xml"/>
+
+  <option timestep="0.01"/>
+  <statistic center="0 0 0.1" extent="0.2" meansize=".05"/>
+
+  <visual>
+    <!-- 增强头灯亮度以提高可见度 -->
+    <headlight diffuse="1.0 1.0 1.0" ambient="0.8 0.8 0.8" specular="0.3 0.3 0.3"/>
+    <!-- 完全关闭雾效 -->
+    <rgba haze="0 0 0 1"/>
+    <!-- 调整全局光照角度，从上方照明 -->
+    <global azimuth="45" elevation="45" ellipsoidinertia="false"/>
+    <!-- 质量和视野设置 -->
+    <quality shadowsize="4096" offsamples="8"/>
+    <!-- 关闭距离雾，让远处物体保持清晰 -->
+    <map fogstart="1000" fogend="2000" znear="0.01"/>
+  </visual>
+
+  <asset>
+    <!-- 更亮的天空盒，提供更好的环境光 -->
+    <texture type="skybox" builtin="gradient" rgb1="0.6 0.7 0.9" rgb2="0.3 0.4 0.6" width="512" height="3072"/>
+    <!-- 更亮的地面纹理 -->
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.4 0.45 0.5" rgb2="0.3 0.35 0.4"
+      markrgb="0.95 0.95 0.95" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.3"/>
+  </asset>
+
+  <worldbody>
+    <!-- 默认跟踪摄像机（跟随无人机） - 放在第一个作为默认 -->
+    <camera name="track_cam" mode="trackcom" pos="0 -2 1.5" xyaxes="1 0 0 0 0.5 1"/>
+    <!-- 备用视角摄像机 -->
+    <camera name="side_cam" pos="3 0 1" xyaxes="0 -1 0 0.3 0 1"/>
+    <camera name="top_cam" pos="0 0 5" xyaxes="1 0 0 0 1 0"/>
+    
+    <!-- 全方位照明系统 - 确保整个场景都有充足光照 -->
+    <!-- 主光源：从上方直射 -->
+    <light pos="0 0 10" dir="0 0 -1" directional="true" diffuse="1.0 1.0 1.0" specular="0.4 0.4 0.4" castshadow="false"/>
+    
+    <!-- 辅助光源：四个角落的点光源，覆盖大范围 -->
+    <light pos="5 5 5" directional="false" diffuse="0.7 0.7 0.7" specular="0.2 0.2 0.2" castshadow="false"/>
+    <light pos="-5 5 5" directional="false" diffuse="0.7 0.7 0.7" specular="0.2 0.2 0.2" castshadow="false"/>
+    <light pos="5 -5 5" directional="false" diffuse="0.7 0.7 0.7" specular="0.2 0.2 0.2" castshadow="false"/>
+    <light pos="-5 -5 5" directional="false" diffuse="0.7 0.7 0.7" specular="0.2 0.2 0.2" castshadow="false"/>
+    
+    <!-- 补光：侧面光源 -->
+    <light pos="10 0 3" dir="-1 0 -0.3" directional="false" diffuse="0.5 0.5 0.5" specular="0.1 0.1 0.1" castshadow="false"/>
+    <light pos="-10 0 3" dir="1 0 -0.3" directional="false" diffuse="0.5 0.5 0.5" specular="0.1 0.1 0.1" castshadow="false"/>
+    <light pos="0 10 3" dir="0 -1 -0.3" directional="false" diffuse="0.5 0.5 0.5" specular="0.1 0.1 0.1" castshadow="false"/>
+    <light pos="0 -10 3" dir="0 1 -0.3" directional="false" diffuse="0.5 0.5 0.5" specular="0.1 0.1 0.1" castshadow="false"/>
+    
+    <!-- <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/> -->
+  </worldbody>
+</mujoco>
