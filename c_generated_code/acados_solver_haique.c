@@ -39,87 +39,87 @@
 
 // example specific
 
-#include "crazyflie_model/crazyflie_model.h"
+#include "haique_model/haique_model.h"
 
 
 
 
 
-#include "acados_solver_crazyflie.h"
+#include "acados_solver_haique.h"
 
-#define NX     CRAZYFLIE_NX
-#define NZ     CRAZYFLIE_NZ
-#define NU     CRAZYFLIE_NU
-#define NP     CRAZYFLIE_NP
-#define NP_GLOBAL     CRAZYFLIE_NP_GLOBAL
-#define NY0    CRAZYFLIE_NY0
-#define NY     CRAZYFLIE_NY
-#define NYN    CRAZYFLIE_NYN
+#define NX     HAIQUE_NX
+#define NZ     HAIQUE_NZ
+#define NU     HAIQUE_NU
+#define NP     HAIQUE_NP
+#define NP_GLOBAL     HAIQUE_NP_GLOBAL
+#define NY0    HAIQUE_NY0
+#define NY     HAIQUE_NY
+#define NYN    HAIQUE_NYN
 
-#define NBX    CRAZYFLIE_NBX
-#define NBX0   CRAZYFLIE_NBX0
-#define NBU    CRAZYFLIE_NBU
-#define NG     CRAZYFLIE_NG
-#define NBXN   CRAZYFLIE_NBXN
-#define NGN    CRAZYFLIE_NGN
+#define NBX    HAIQUE_NBX
+#define NBX0   HAIQUE_NBX0
+#define NBU    HAIQUE_NBU
+#define NG     HAIQUE_NG
+#define NBXN   HAIQUE_NBXN
+#define NGN    HAIQUE_NGN
 
-#define NH     CRAZYFLIE_NH
-#define NHN    CRAZYFLIE_NHN
-#define NH0    CRAZYFLIE_NH0
-#define NPHI   CRAZYFLIE_NPHI
-#define NPHIN  CRAZYFLIE_NPHIN
-#define NPHI0  CRAZYFLIE_NPHI0
-#define NR     CRAZYFLIE_NR
+#define NH     HAIQUE_NH
+#define NHN    HAIQUE_NHN
+#define NH0    HAIQUE_NH0
+#define NPHI   HAIQUE_NPHI
+#define NPHIN  HAIQUE_NPHIN
+#define NPHI0  HAIQUE_NPHI0
+#define NR     HAIQUE_NR
 
-#define NS     CRAZYFLIE_NS
-#define NS0    CRAZYFLIE_NS0
-#define NSN    CRAZYFLIE_NSN
+#define NS     HAIQUE_NS
+#define NS0    HAIQUE_NS0
+#define NSN    HAIQUE_NSN
 
-#define NSBX   CRAZYFLIE_NSBX
-#define NSBU   CRAZYFLIE_NSBU
-#define NSH0   CRAZYFLIE_NSH0
-#define NSH    CRAZYFLIE_NSH
-#define NSHN   CRAZYFLIE_NSHN
-#define NSG    CRAZYFLIE_NSG
-#define NSPHI0 CRAZYFLIE_NSPHI0
-#define NSPHI  CRAZYFLIE_NSPHI
-#define NSPHIN CRAZYFLIE_NSPHIN
-#define NSGN   CRAZYFLIE_NSGN
-#define NSBXN  CRAZYFLIE_NSBXN
+#define NSBX   HAIQUE_NSBX
+#define NSBU   HAIQUE_NSBU
+#define NSH0   HAIQUE_NSH0
+#define NSH    HAIQUE_NSH
+#define NSHN   HAIQUE_NSHN
+#define NSG    HAIQUE_NSG
+#define NSPHI0 HAIQUE_NSPHI0
+#define NSPHI  HAIQUE_NSPHI
+#define NSPHIN HAIQUE_NSPHIN
+#define NSGN   HAIQUE_NSGN
+#define NSBXN  HAIQUE_NSBXN
 
 
 
 // ** solver data **
 
-crazyflie_solver_capsule * crazyflie_acados_create_capsule(void)
+haique_solver_capsule * haique_acados_create_capsule(void)
 {
-    void* capsule_mem = malloc(sizeof(crazyflie_solver_capsule));
-    crazyflie_solver_capsule *capsule = (crazyflie_solver_capsule *) capsule_mem;
+    void* capsule_mem = malloc(sizeof(haique_solver_capsule));
+    haique_solver_capsule *capsule = (haique_solver_capsule *) capsule_mem;
 
     return capsule;
 }
 
 
-int crazyflie_acados_free_capsule(crazyflie_solver_capsule *capsule)
+int haique_acados_free_capsule(haique_solver_capsule *capsule)
 {
     free(capsule);
     return 0;
 }
 
 
-int crazyflie_acados_create(crazyflie_solver_capsule* capsule)
+int haique_acados_create(haique_solver_capsule* capsule)
 {
-    int N_shooting_intervals = CRAZYFLIE_N;
+    int N_shooting_intervals = HAIQUE_N;
     double* new_time_steps = NULL; // NULL -> don't alter the code generated time-steps
-    return crazyflie_acados_create_with_discretization(capsule, N_shooting_intervals, new_time_steps);
+    return haique_acados_create_with_discretization(capsule, N_shooting_intervals, new_time_steps);
 }
 
 
-int crazyflie_acados_update_time_steps(crazyflie_solver_capsule* capsule, int N, double* new_time_steps)
+int haique_acados_update_time_steps(haique_solver_capsule* capsule, int N, double* new_time_steps)
 {
 
     if (N != capsule->nlp_solver_plan->N) {
-        fprintf(stderr, "crazyflie_acados_update_time_steps: given number of time steps (= %d) " \
+        fprintf(stderr, "haique_acados_update_time_steps: given number of time steps (= %d) " \
             "differs from the currently allocated number of " \
             "time steps (= %d)!\n" \
             "Please recreate with new discretization and provide a new vector of time_stamps!\n",
@@ -141,9 +141,9 @@ int crazyflie_acados_update_time_steps(crazyflie_solver_capsule* capsule, int N,
 }
 
 /**
- * Internal function for crazyflie_acados_create: step 1
+ * Internal function for haique_acados_create: step 1
  */
-void crazyflie_acados_create_set_plan(ocp_nlp_plan_t* nlp_solver_plan, const int N)
+void haique_acados_create_set_plan(ocp_nlp_plan_t* nlp_solver_plan, const int N)
 {
     assert(N == nlp_solver_plan->N);
 
@@ -181,7 +181,7 @@ void crazyflie_acados_create_set_plan(ocp_nlp_plan_t* nlp_solver_plan, const int
 }
 
 
-static ocp_nlp_dims* crazyflie_acados_create_setup_dimensions(crazyflie_solver_capsule* capsule)
+static ocp_nlp_dims* haique_acados_create_setup_dimensions(haique_solver_capsule* capsule)
 {
     ocp_nlp_plan_t* nlp_solver_plan = capsule->nlp_solver_plan;
     const int N = nlp_solver_plan->N;
@@ -314,9 +314,9 @@ static ocp_nlp_dims* crazyflie_acados_create_setup_dimensions(crazyflie_solver_c
 
 
 /**
- * Internal function for crazyflie_acados_create: step 3
+ * Internal function for haique_acados_create: step 3
  */
-void crazyflie_acados_create_setup_functions(crazyflie_solver_capsule* capsule)
+void haique_acados_create_setup_functions(haique_solver_capsule* capsule)
 {
     const int N = capsule->nlp_solver_plan->N;
 
@@ -348,17 +348,17 @@ void crazyflie_acados_create_setup_functions(crazyflie_solver_capsule* capsule)
         // explicit ode
         capsule->expl_vde_forw = (external_function_external_param_casadi *) malloc(sizeof(external_function_external_param_casadi)*N);
         for (int i = 0; i < N; i++) {
-            MAP_CASADI_FNC(expl_vde_forw[i], crazyflie_expl_vde_forw);
+            MAP_CASADI_FNC(expl_vde_forw[i], haique_expl_vde_forw);
         }
 
         capsule->expl_ode_fun = (external_function_external_param_casadi *) malloc(sizeof(external_function_external_param_casadi)*N);
         for (int i = 0; i < N; i++) {
-            MAP_CASADI_FNC(expl_ode_fun[i], crazyflie_expl_ode_fun);
+            MAP_CASADI_FNC(expl_ode_fun[i], haique_expl_ode_fun);
         }
 
         capsule->expl_vde_adj = (external_function_external_param_casadi *) malloc(sizeof(external_function_external_param_casadi)*N);
         for (int i = 0; i < N; i++) {
-            MAP_CASADI_FNC(expl_vde_adj[i], crazyflie_expl_vde_adj);
+            MAP_CASADI_FNC(expl_vde_adj[i], haique_expl_vde_adj);
         }
 
     
@@ -369,9 +369,9 @@ void crazyflie_acados_create_setup_functions(crazyflie_solver_capsule* capsule)
 
 
 /**
- * Internal function for crazyflie_acados_create: step 5
+ * Internal function for haique_acados_create: step 5
  */
-void crazyflie_acados_create_set_default_parameters(crazyflie_solver_capsule* capsule)
+void haique_acados_create_set_default_parameters(haique_solver_capsule* capsule)
 {
 
     const int N = capsule->nlp_solver_plan->N;
@@ -379,7 +379,7 @@ void crazyflie_acados_create_set_default_parameters(crazyflie_solver_capsule* ca
     double* p = calloc(NP, sizeof(double));
 
     for (int i = 0; i <= N; i++) {
-        crazyflie_acados_update_params(capsule, i, p, NP);
+        haique_acados_update_params(capsule, i, p, NP);
     }
     free(p);
 
@@ -389,9 +389,9 @@ void crazyflie_acados_create_set_default_parameters(crazyflie_solver_capsule* ca
 
 
 /**
- * Internal function for crazyflie_acados_create: step 5
+ * Internal function for haique_acados_create: step 5
  */
-void crazyflie_acados_setup_nlp_in(crazyflie_solver_capsule* capsule, const int N, double* new_time_steps)
+void haique_acados_setup_nlp_in(haique_solver_capsule* capsule, const int N, double* new_time_steps)
 {
     assert(N == capsule->nlp_solver_plan->N);
     ocp_nlp_config* nlp_config = capsule->nlp_config;
@@ -413,49 +413,49 @@ void crazyflie_acados_setup_nlp_in(crazyflie_solver_capsule* capsule, const int 
     if (new_time_steps)
     {
         // NOTE: this sets scaling and time_steps
-        crazyflie_acados_update_time_steps(capsule, N, new_time_steps);
+        haique_acados_update_time_steps(capsule, N, new_time_steps);
     }
     else
     {
         // set time_steps
     
-        double time_step = 0.02;
+        double time_step = 0.016666666666666666;
         for (int i = 0; i < N; i++)
         {
             ocp_nlp_in_set(nlp_config, nlp_dims, nlp_in, i, "Ts", &time_step);
         }
         // set cost scaling
         double* cost_scaling = malloc((N+1)*sizeof(double));
-        cost_scaling[0] = 0.02;
-        cost_scaling[1] = 0.02;
-        cost_scaling[2] = 0.02;
-        cost_scaling[3] = 0.02;
-        cost_scaling[4] = 0.02;
-        cost_scaling[5] = 0.02;
-        cost_scaling[6] = 0.02;
-        cost_scaling[7] = 0.02;
-        cost_scaling[8] = 0.02;
-        cost_scaling[9] = 0.02;
-        cost_scaling[10] = 0.02;
-        cost_scaling[11] = 0.02;
-        cost_scaling[12] = 0.02;
-        cost_scaling[13] = 0.02;
-        cost_scaling[14] = 0.02;
-        cost_scaling[15] = 0.02;
-        cost_scaling[16] = 0.02;
-        cost_scaling[17] = 0.02;
-        cost_scaling[18] = 0.02;
-        cost_scaling[19] = 0.02;
-        cost_scaling[20] = 0.02;
-        cost_scaling[21] = 0.02;
-        cost_scaling[22] = 0.02;
-        cost_scaling[23] = 0.02;
-        cost_scaling[24] = 0.02;
-        cost_scaling[25] = 0.02;
-        cost_scaling[26] = 0.02;
-        cost_scaling[27] = 0.02;
-        cost_scaling[28] = 0.02;
-        cost_scaling[29] = 0.02;
+        cost_scaling[0] = 0.016666666666666666;
+        cost_scaling[1] = 0.016666666666666666;
+        cost_scaling[2] = 0.016666666666666666;
+        cost_scaling[3] = 0.016666666666666666;
+        cost_scaling[4] = 0.016666666666666666;
+        cost_scaling[5] = 0.016666666666666666;
+        cost_scaling[6] = 0.016666666666666666;
+        cost_scaling[7] = 0.016666666666666666;
+        cost_scaling[8] = 0.016666666666666666;
+        cost_scaling[9] = 0.016666666666666666;
+        cost_scaling[10] = 0.016666666666666666;
+        cost_scaling[11] = 0.016666666666666666;
+        cost_scaling[12] = 0.016666666666666666;
+        cost_scaling[13] = 0.016666666666666666;
+        cost_scaling[14] = 0.016666666666666666;
+        cost_scaling[15] = 0.016666666666666666;
+        cost_scaling[16] = 0.016666666666666666;
+        cost_scaling[17] = 0.016666666666666666;
+        cost_scaling[18] = 0.016666666666666666;
+        cost_scaling[19] = 0.016666666666666666;
+        cost_scaling[20] = 0.016666666666666666;
+        cost_scaling[21] = 0.016666666666666666;
+        cost_scaling[22] = 0.016666666666666666;
+        cost_scaling[23] = 0.016666666666666666;
+        cost_scaling[24] = 0.016666666666666666;
+        cost_scaling[25] = 0.016666666666666666;
+        cost_scaling[26] = 0.016666666666666666;
+        cost_scaling[27] = 0.016666666666666666;
+        cost_scaling[28] = 0.016666666666666666;
+        cost_scaling[29] = 0.016666666666666666;
         cost_scaling[30] = 1;
         for (int i = 0; i <= N; i++)
         {
@@ -478,33 +478,43 @@ void crazyflie_acados_setup_nlp_in(crazyflie_solver_capsule* capsule, const int 
     double* yref_0 = calloc(NY0, sizeof(double));
     // change only the non-zero elements:
     yref_0[3] = 1;
-    yref_0[13] = 5.7092593716319175;
-    yref_0[14] = 5.7092593716319175;
-    yref_0[15] = 5.7092593716319175;
-    yref_0[16] = 5.7092593716319175;
+    yref_0[13] = 16.148224068935104;
+    yref_0[14] = 16.148224068935104;
+    yref_0[15] = 16.148224068935104;
+    yref_0[16] = 16.148224068935104;
+    yref_0[17] = 16.148224068935104;
+    yref_0[18] = 16.148224068935104;
+    yref_0[19] = 16.148224068935104;
+    yref_0[20] = 16.148224068935104;
+    yref_0[21] = 1.5707963267948966;
+    yref_0[22] = 1.5707963267948966;
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, 0, "yref", yref_0);
     free(yref_0);
 
    double* W_0 = calloc(NY0*NY0, sizeof(double));
     // change only the non-zero elements:
-    W_0[0+(NY0) * 0] = 160;
-    W_0[1+(NY0) * 1] = 160;
-    W_0[2+(NY0) * 2] = 260;
-    W_0[3+(NY0) * 3] = 10;
+    W_0[0+(NY0) * 0] = 60;
+    W_0[1+(NY0) * 1] = 60;
+    W_0[2+(NY0) * 2] = 150;
     W_0[4+(NY0) * 4] = 60;
-    W_0[5+(NY0) * 5] = 80;
-    W_0[6+(NY0) * 6] = 60;
-    W_0[7+(NY0) * 7] = 80;
-    W_0[8+(NY0) * 8] = 80;
-    W_0[9+(NY0) * 9] = 220;
-    W_0[10+(NY0) * 10] = 120;
-    W_0[11+(NY0) * 11] = 120;
-    W_0[12+(NY0) * 12] = 80;
-    W_0[13+(NY0) * 13] = 1.1;
-    W_0[14+(NY0) * 14] = 1.1;
-    W_0[15+(NY0) * 15] = 1.1;
-    W_0[16+(NY0) * 16] = 1.1;
+    W_0[5+(NY0) * 5] = 100;
+    W_0[6+(NY0) * 6] = 50;
+    W_0[7+(NY0) * 7] = 10;
+    W_0[8+(NY0) * 8] = 10;
+    W_0[9+(NY0) * 9] = 30;
+    W_0[10+(NY0) * 10] = 30;
+    W_0[11+(NY0) * 11] = 40;
+    W_0[12+(NY0) * 12] = 100;
+    W_0[13+(NY0) * 13] = 0.5;
+    W_0[14+(NY0) * 14] = 0.5;
+    W_0[15+(NY0) * 15] = 0.5;
+    W_0[16+(NY0) * 16] = 0.5;
     W_0[17+(NY0) * 17] = 0.5;
+    W_0[18+(NY0) * 18] = 0.5;
+    W_0[19+(NY0) * 19] = 0.5;
+    W_0[20+(NY0) * 20] = 0.5;
+    W_0[21+(NY0) * 21] = 0.1;
+    W_0[22+(NY0) * 22] = 0.1;
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, 0, "W", W_0);
     free(W_0);
     double* Vx_0 = calloc(NY0*NX, sizeof(double));
@@ -527,19 +537,24 @@ void crazyflie_acados_setup_nlp_in(crazyflie_solver_capsule* capsule, const int 
     double* Vu_0 = calloc(NY0*NU, sizeof(double));
     // change only the non-zero elements:
     Vu_0[13+(NY0) * 0] = 1;
-    Vu_0[14+(NY0) * 1] = 1;
     Vu_0[15+(NY0) * 2] = 1;
-    Vu_0[16+(NY0) * 3] = 1;
     Vu_0[17+(NY0) * 4] = 1;
+    Vu_0[19+(NY0) * 6] = 1;
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, 0, "Vu", Vu_0);
     free(Vu_0);
     double* yref = calloc(NY, sizeof(double));
     // change only the non-zero elements:
     yref[3] = 1;
-    yref[13] = 5.7092593716319175;
-    yref[14] = 5.7092593716319175;
-    yref[15] = 5.7092593716319175;
-    yref[16] = 5.7092593716319175;
+    yref[13] = 16.148224068935104;
+    yref[14] = 16.148224068935104;
+    yref[15] = 16.148224068935104;
+    yref[16] = 16.148224068935104;
+    yref[17] = 16.148224068935104;
+    yref[18] = 16.148224068935104;
+    yref[19] = 16.148224068935104;
+    yref[20] = 16.148224068935104;
+    yref[21] = 1.5707963267948966;
+    yref[22] = 1.5707963267948966;
 
     for (int i = 1; i < N; i++)
     {
@@ -548,24 +563,28 @@ void crazyflie_acados_setup_nlp_in(crazyflie_solver_capsule* capsule, const int 
     free(yref);
     double* W = calloc(NY*NY, sizeof(double));
     // change only the non-zero elements:
-    W[0+(NY) * 0] = 160;
-    W[1+(NY) * 1] = 160;
-    W[2+(NY) * 2] = 260;
-    W[3+(NY) * 3] = 10;
+    W[0+(NY) * 0] = 60;
+    W[1+(NY) * 1] = 60;
+    W[2+(NY) * 2] = 150;
     W[4+(NY) * 4] = 60;
-    W[5+(NY) * 5] = 80;
-    W[6+(NY) * 6] = 60;
-    W[7+(NY) * 7] = 80;
-    W[8+(NY) * 8] = 80;
-    W[9+(NY) * 9] = 220;
-    W[10+(NY) * 10] = 120;
-    W[11+(NY) * 11] = 120;
-    W[12+(NY) * 12] = 80;
-    W[13+(NY) * 13] = 1.1;
-    W[14+(NY) * 14] = 1.1;
-    W[15+(NY) * 15] = 1.1;
-    W[16+(NY) * 16] = 1.1;
+    W[5+(NY) * 5] = 100;
+    W[6+(NY) * 6] = 50;
+    W[7+(NY) * 7] = 10;
+    W[8+(NY) * 8] = 10;
+    W[9+(NY) * 9] = 30;
+    W[10+(NY) * 10] = 30;
+    W[11+(NY) * 11] = 40;
+    W[12+(NY) * 12] = 100;
+    W[13+(NY) * 13] = 0.5;
+    W[14+(NY) * 14] = 0.5;
+    W[15+(NY) * 15] = 0.5;
+    W[16+(NY) * 16] = 0.5;
     W[17+(NY) * 17] = 0.5;
+    W[18+(NY) * 18] = 0.5;
+    W[19+(NY) * 19] = 0.5;
+    W[20+(NY) * 20] = 0.5;
+    W[21+(NY) * 21] = 0.1;
+    W[22+(NY) * 22] = 0.1;
 
     for (int i = 1; i < N; i++)
     {
@@ -597,10 +616,9 @@ void crazyflie_acados_setup_nlp_in(crazyflie_solver_capsule* capsule, const int 
     double* Vu = calloc(NY*NU, sizeof(double));
     // change only the non-zero elements:
     Vu[13+(NY) * 0] = 1;
-    Vu[14+(NY) * 1] = 1;
     Vu[15+(NY) * 2] = 1;
-    Vu[16+(NY) * 3] = 1;
     Vu[17+(NY) * 4] = 1;
+    Vu[19+(NY) * 6] = 1;
 
     for (int i = 1; i < N; i++)
     {
@@ -615,19 +633,18 @@ void crazyflie_acados_setup_nlp_in(crazyflie_solver_capsule* capsule, const int 
 
     double* W_e = calloc(NYN*NYN, sizeof(double));
     // change only the non-zero elements:
-    W_e[0+(NYN) * 0] = 1600;
-    W_e[1+(NYN) * 1] = 1600;
-    W_e[2+(NYN) * 2] = 2600;
-    W_e[3+(NYN) * 3] = 100;
-    W_e[4+(NYN) * 4] = 600;
-    W_e[5+(NYN) * 5] = 800;
-    W_e[6+(NYN) * 6] = 600;
-    W_e[7+(NYN) * 7] = 800;
-    W_e[8+(NYN) * 8] = 800;
-    W_e[9+(NYN) * 9] = 2200;
-    W_e[10+(NYN) * 10] = 1200;
-    W_e[11+(NYN) * 11] = 1200;
-    W_e[12+(NYN) * 12] = 800;
+    W_e[0+(NYN) * 0] = 3000;
+    W_e[1+(NYN) * 1] = 3000;
+    W_e[2+(NYN) * 2] = 7500;
+    W_e[4+(NYN) * 4] = 3000;
+    W_e[5+(NYN) * 5] = 5000;
+    W_e[6+(NYN) * 6] = 2500;
+    W_e[7+(NYN) * 7] = 500;
+    W_e[8+(NYN) * 8] = 500;
+    W_e[9+(NYN) * 9] = 1500;
+    W_e[10+(NYN) * 10] = 1500;
+    W_e[11+(NYN) * 11] = 2000;
+    W_e[12+(NYN) * 12] = 5000;
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, N, "W", W_e);
     free(W_e);
     double* Vx_e = calloc(NYN*NX, sizeof(double));
@@ -722,15 +739,28 @@ void crazyflie_acados_setup_nlp_in(crazyflie_solver_capsule* capsule, const int 
     idxbu[2] = 2;
     idxbu[3] = 3;
     idxbu[4] = 4;
+    idxbu[5] = 5;
+    idxbu[6] = 6;
+    idxbu[7] = 7;
+    idxbu[8] = 8;
+    idxbu[9] = 9;
     double* lubu = calloc(2*NBU, sizeof(double));
     double* lbu = lubu;
     double* ubu = lubu + NBU;
-    ubu[0] = 22;
-    ubu[1] = 22;
-    ubu[2] = 22;
-    ubu[3] = 22;
-    lbu[4] = -0.8;
-    ubu[4] = 0.8;
+    ubu[0] = 30;
+    lbu[1] = -30;
+    ubu[1] = 30;
+    ubu[2] = 30;
+    lbu[3] = -30;
+    ubu[3] = 30;
+    ubu[4] = 30;
+    lbu[5] = -30;
+    ubu[5] = 30;
+    ubu[6] = 30;
+    lbu[7] = -30;
+    ubu[7] = 30;
+    ubu[8] = 3.141592653589793;
+    ubu[9] = 3.141592653589793;
 
     for (int i = 0; i < N; i++)
     {
@@ -785,7 +815,7 @@ void crazyflie_acados_setup_nlp_in(crazyflie_solver_capsule* capsule, const int 
 }
 
 
-static void crazyflie_acados_create_set_opts(crazyflie_solver_capsule* capsule)
+static void haique_acados_create_set_opts(haique_solver_capsule* capsule)
 {
     const int N = capsule->nlp_solver_plan->N;
     ocp_nlp_config* nlp_config = capsule->nlp_config;
@@ -906,9 +936,9 @@ static void crazyflie_acados_create_set_opts(crazyflie_solver_capsule* capsule)
 
 
 /**
- * Internal function for crazyflie_acados_create: step 7
+ * Internal function for haique_acados_create: step 7
  */
-void crazyflie_acados_set_nlp_out(crazyflie_solver_capsule* capsule)
+void haique_acados_set_nlp_out(haique_solver_capsule* capsule)
 {
     const int N = capsule->nlp_solver_plan->N;
     ocp_nlp_config* nlp_config = capsule->nlp_config;
@@ -939,9 +969,9 @@ void crazyflie_acados_set_nlp_out(crazyflie_solver_capsule* capsule)
 
 
 /**
- * Internal function for crazyflie_acados_create: step 9
+ * Internal function for haique_acados_create: step 9
  */
-int crazyflie_acados_create_precompute(crazyflie_solver_capsule* capsule) {
+int haique_acados_create_precompute(haique_solver_capsule* capsule) {
     int status = ocp_nlp_precompute(capsule->nlp_solver, capsule->nlp_in, capsule->nlp_out);
 
     if (status != ACADOS_SUCCESS) {
@@ -953,14 +983,14 @@ int crazyflie_acados_create_precompute(crazyflie_solver_capsule* capsule) {
 }
 
 
-int crazyflie_acados_create_with_discretization(crazyflie_solver_capsule* capsule, int N, double* new_time_steps)
+int haique_acados_create_with_discretization(haique_solver_capsule* capsule, int N, double* new_time_steps)
 {
     // If N does not match the number of shooting intervals used for code generation, new_time_steps must be given.
-    if (N != CRAZYFLIE_N && !new_time_steps) {
-        fprintf(stderr, "crazyflie_acados_create_with_discretization: new_time_steps is NULL " \
+    if (N != HAIQUE_N && !new_time_steps) {
+        fprintf(stderr, "haique_acados_create_with_discretization: new_time_steps is NULL " \
             "but the number of shooting intervals (= %d) differs from the number of " \
             "shooting intervals (= %d) during code generation! Please provide a new vector of time_stamps!\n", \
-             N, CRAZYFLIE_N);
+             N, HAIQUE_N);
         return 1;
     }
 
@@ -969,37 +999,37 @@ int crazyflie_acados_create_with_discretization(crazyflie_solver_capsule* capsul
 
     // 1) create and set nlp_solver_plan; create nlp_config
     capsule->nlp_solver_plan = ocp_nlp_plan_create(N);
-    crazyflie_acados_create_set_plan(capsule->nlp_solver_plan, N);
+    haique_acados_create_set_plan(capsule->nlp_solver_plan, N);
     capsule->nlp_config = ocp_nlp_config_create(*capsule->nlp_solver_plan);
 
     // 2) create and set dimensions
-    capsule->nlp_dims = crazyflie_acados_create_setup_dimensions(capsule);
+    capsule->nlp_dims = haique_acados_create_setup_dimensions(capsule);
 
     // 3) create and set nlp_opts
     capsule->nlp_opts = ocp_nlp_solver_opts_create(capsule->nlp_config, capsule->nlp_dims);
-    crazyflie_acados_create_set_opts(capsule);
+    haique_acados_create_set_opts(capsule);
 
     // 4) create and set nlp_out
     // 4.1) nlp_out
     capsule->nlp_out = ocp_nlp_out_create(capsule->nlp_config, capsule->nlp_dims);
     // 4.2) sens_out
     capsule->sens_out = ocp_nlp_out_create(capsule->nlp_config, capsule->nlp_dims);
-    crazyflie_acados_set_nlp_out(capsule);
+    haique_acados_set_nlp_out(capsule);
 
     // 5) create nlp_in
     capsule->nlp_in = ocp_nlp_in_create(capsule->nlp_config, capsule->nlp_dims);
 
     // 6) setup functions, nlp_in and default parameters
-    crazyflie_acados_create_setup_functions(capsule);
-    crazyflie_acados_setup_nlp_in(capsule, N, new_time_steps);
-    crazyflie_acados_create_set_default_parameters(capsule);
+    haique_acados_create_setup_functions(capsule);
+    haique_acados_setup_nlp_in(capsule, N, new_time_steps);
+    haique_acados_create_set_default_parameters(capsule);
 
     // 7) create solver
     capsule->nlp_solver = ocp_nlp_solver_create(capsule->nlp_config, capsule->nlp_dims, capsule->nlp_opts, capsule->nlp_in);
 
 
     // 8) do precomputations
-    int status = crazyflie_acados_create_precompute(capsule);
+    int status = haique_acados_create_precompute(capsule);
 
     return status;
 }
@@ -1007,7 +1037,7 @@ int crazyflie_acados_create_with_discretization(crazyflie_solver_capsule* capsul
 /**
  * This function is for updating an already initialized solver with a different number of qp_cond_N. It is useful for code reuse after code export.
  */
-int crazyflie_acados_update_qp_solver_cond_N(crazyflie_solver_capsule* capsule, int qp_solver_cond_N)
+int haique_acados_update_qp_solver_cond_N(haique_solver_capsule* capsule, int qp_solver_cond_N)
 {
     // 1) destroy solver
     ocp_nlp_solver_destroy(capsule->nlp_solver);
@@ -1018,17 +1048,17 @@ int crazyflie_acados_update_qp_solver_cond_N(crazyflie_solver_capsule* capsule, 
         printf("Warning: qp_solver_cond_N = %d > N = %d\n", qp_solver_cond_N, N);
     ocp_nlp_solver_opts_set(capsule->nlp_config, capsule->nlp_opts, "qp_cond_N", &qp_solver_cond_N);
 
-    // 3) continue with the remaining steps from crazyflie_acados_create_with_discretization(...):
+    // 3) continue with the remaining steps from haique_acados_create_with_discretization(...):
     // -> 8) create solver
     capsule->nlp_solver = ocp_nlp_solver_create(capsule->nlp_config, capsule->nlp_dims, capsule->nlp_opts, capsule->nlp_in);
 
     // -> 9) do precomputations
-    int status = crazyflie_acados_create_precompute(capsule);
+    int status = haique_acados_create_precompute(capsule);
     return status;
 }
 
 
-int crazyflie_acados_reset(crazyflie_solver_capsule* capsule, int reset_qp_solver_mem)
+int haique_acados_reset(haique_solver_capsule* capsule, int reset_qp_solver_mem)
 {
 
     // set initialization to all zeros
@@ -1071,7 +1101,7 @@ int crazyflie_acados_reset(crazyflie_solver_capsule* capsule, int reset_qp_solve
 
 
 
-int crazyflie_acados_update_params(crazyflie_solver_capsule* capsule, int stage, double *p, int np)
+int haique_acados_update_params(haique_solver_capsule* capsule, int stage, double *p, int np)
 {
     int solver_status = 0;
 
@@ -1087,7 +1117,7 @@ int crazyflie_acados_update_params(crazyflie_solver_capsule* capsule, int stage,
 }
 
 
-int crazyflie_acados_update_params_sparse(crazyflie_solver_capsule * capsule, int stage, int *idx, double *p, int n_update)
+int haique_acados_update_params_sparse(haique_solver_capsule * capsule, int stage, int *idx, double *p, int n_update)
 {
     ocp_nlp_in_set_params_sparse(capsule->nlp_config, capsule->nlp_dims, capsule->nlp_in, stage, idx, p, n_update);
 
@@ -1095,17 +1125,17 @@ int crazyflie_acados_update_params_sparse(crazyflie_solver_capsule * capsule, in
 }
 
 
-int crazyflie_acados_set_p_global_and_precompute_dependencies(crazyflie_solver_capsule* capsule, double* data, int data_len)
+int haique_acados_set_p_global_and_precompute_dependencies(haique_solver_capsule* capsule, double* data, int data_len)
 {
 
-    // printf("No global_data, crazyflie_acados_set_p_global_and_precompute_dependencies does nothing.\n");
+    // printf("No global_data, haique_acados_set_p_global_and_precompute_dependencies does nothing.\n");
     return 0;
 }
 
 
 
 
-int crazyflie_acados_solve(crazyflie_solver_capsule* capsule)
+int haique_acados_solve(haique_solver_capsule* capsule)
 {
     // solve NLP
     int solver_status = ocp_nlp_solve(capsule->nlp_solver, capsule->nlp_in, capsule->nlp_out);
@@ -1115,7 +1145,7 @@ int crazyflie_acados_solve(crazyflie_solver_capsule* capsule)
 
 
 
-int crazyflie_acados_setup_qp_matrices_and_factorize(crazyflie_solver_capsule* capsule)
+int haique_acados_setup_qp_matrices_and_factorize(haique_solver_capsule* capsule)
 {
     int solver_status = ocp_nlp_setup_qp_matrices_and_factorize(capsule->nlp_solver, capsule->nlp_in, capsule->nlp_out);
 
@@ -1127,7 +1157,7 @@ int crazyflie_acados_setup_qp_matrices_and_factorize(crazyflie_solver_capsule* c
 
 
 
-int crazyflie_acados_free(crazyflie_solver_capsule* capsule)
+int haique_acados_free(haique_solver_capsule* capsule)
 {
     // before destroying, keep some info
     const int N = capsule->nlp_solver_plan->N;
@@ -1163,7 +1193,7 @@ int crazyflie_acados_free(crazyflie_solver_capsule* capsule)
 }
 
 
-void crazyflie_acados_print_stats(crazyflie_solver_capsule* capsule)
+void haique_acados_print_stats(haique_solver_capsule* capsule)
 {
     int nlp_iter, stat_m, stat_n, tmp_int;
     ocp_nlp_get(capsule->nlp_solver, "nlp_iter", &nlp_iter);
@@ -1195,7 +1225,7 @@ void crazyflie_acados_print_stats(crazyflie_solver_capsule* capsule)
     }
 }
 
-int crazyflie_acados_custom_update(crazyflie_solver_capsule* capsule, double* data, int data_len)
+int haique_acados_custom_update(haique_solver_capsule* capsule, double* data, int data_len)
 {
     (void)capsule;
     (void)data;
@@ -1208,11 +1238,11 @@ int crazyflie_acados_custom_update(crazyflie_solver_capsule* capsule, double* da
 
 
 
-ocp_nlp_in *crazyflie_acados_get_nlp_in(crazyflie_solver_capsule* capsule) { return capsule->nlp_in; }
-ocp_nlp_out *crazyflie_acados_get_nlp_out(crazyflie_solver_capsule* capsule) { return capsule->nlp_out; }
-ocp_nlp_out *crazyflie_acados_get_sens_out(crazyflie_solver_capsule* capsule) { return capsule->sens_out; }
-ocp_nlp_solver *crazyflie_acados_get_nlp_solver(crazyflie_solver_capsule* capsule) { return capsule->nlp_solver; }
-ocp_nlp_config *crazyflie_acados_get_nlp_config(crazyflie_solver_capsule* capsule) { return capsule->nlp_config; }
-void *crazyflie_acados_get_nlp_opts(crazyflie_solver_capsule* capsule) { return capsule->nlp_opts; }
-ocp_nlp_dims *crazyflie_acados_get_nlp_dims(crazyflie_solver_capsule* capsule) { return capsule->nlp_dims; }
-ocp_nlp_plan_t *crazyflie_acados_get_nlp_plan(crazyflie_solver_capsule* capsule) { return capsule->nlp_solver_plan; }
+ocp_nlp_in *haique_acados_get_nlp_in(haique_solver_capsule* capsule) { return capsule->nlp_in; }
+ocp_nlp_out *haique_acados_get_nlp_out(haique_solver_capsule* capsule) { return capsule->nlp_out; }
+ocp_nlp_out *haique_acados_get_sens_out(haique_solver_capsule* capsule) { return capsule->sens_out; }
+ocp_nlp_solver *haique_acados_get_nlp_solver(haique_solver_capsule* capsule) { return capsule->nlp_solver; }
+ocp_nlp_config *haique_acados_get_nlp_config(haique_solver_capsule* capsule) { return capsule->nlp_config; }
+void *haique_acados_get_nlp_opts(haique_solver_capsule* capsule) { return capsule->nlp_opts; }
+ocp_nlp_dims *haique_acados_get_nlp_dims(haique_solver_capsule* capsule) { return capsule->nlp_dims; }
+ocp_nlp_plan_t *haique_acados_get_nlp_plan(haique_solver_capsule* capsule) { return capsule->nlp_solver_plan; }

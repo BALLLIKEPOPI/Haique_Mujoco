@@ -24,8 +24,8 @@ Cd = 0.02          # 电机反扭系数 (Nm/krpm^2)
 arm_length = 0.605/2.0  # 电机力臂长度 单位m
 max_thrust = 17.75     # 单个电机最大推力 单位N (电机最大转速22krpm)
 max_torque = 0.02  # 单个电机最大扭矩 单位Nm (电机最大转速22krpm)
-left_servo_offset = -0.1
-right_servo_offset = -0.25
+left_servo_offset = -0.01
+right_servo_offset = -0.05
 # 仿真周期 100Hz 10ms 0.01s
 dt = 0.01
 
@@ -118,16 +118,23 @@ def control_callback(m, d):
         disturbance = None
     _dt, _control = controller.nmpc_position_control(current_state, goal_position, disturbance)
     # 计算实际的8个电机转速
+    # 注意：这里的 yaw_bias 混控必须与 MPC 模型保持一致。
+    # export_model.py 里使用的是“乘法混控”：w_i_ = w_i * (1 ± k_yaw * yaw_bias)
+    # 若这里用加法，会造成模型/执行不一致，典型表现是 yaw_bias 频繁打满、偏航发散。
+    yaw_bias = float(_control[4])
     motor_speeds = np.array([
-        _control[0] - k_yaw * _control[4],  # motor0: Front上,CW
-        _control[1] + k_yaw * _control[4],  # motor1: Left上,CCW
-        _control[2] - k_yaw * _control[4],  # motor2: Rear上,CW
-        _control[3] + k_yaw * _control[4],  # motor3: Right上,CCW
-        _control[0] + k_yaw * _control[4],  # motor4: Front下,CCW
-        _control[1] - k_yaw * _control[4],  # motor5: Left下,CW
-        _control[2] + k_yaw * _control[4],  # motor6: Rear下,CCW
-        _control[3] - k_yaw * _control[4],  # motor7: Right下,CW
-    ])
+        _control[0] * (1 - k_yaw * yaw_bias),  # motor0: Front上,CW
+        _control[1] * (1 + k_yaw * yaw_bias),  # motor1: Left上,CCW
+        _control[2] * (1 - k_yaw * yaw_bias),  # motor2: Rear上,CW
+        _control[3] * (1 + k_yaw * yaw_bias),  # motor3: Right上,CCW
+        _control[0] * (1 + k_yaw * yaw_bias),  # motor4: Front下,CCW
+        _control[1] * (1 - k_yaw * yaw_bias),  # motor5: Left下,CW
+        _control[2] * (1 + k_yaw * yaw_bias),  # motor6: Rear下,CCW
+        _control[3] * (1 - k_yaw * yaw_bias),  # motor7: Right下,CW
+    ], dtype=float)
+
+    # 防止混控后超界（尤其在 yaw_bias 接近约束边界时）
+    motor_speeds = np.clip(motor_speeds, 0.0, controller.max_speed)
     
     # 应用电机控制
     for i in range(8):

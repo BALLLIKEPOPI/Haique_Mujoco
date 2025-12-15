@@ -2,7 +2,6 @@
 # ACADOS NMPC
 from acados_template import AcadosOcp, AcadosOcpSolver
 from export_model import *
-from export_model_underwater import *
 import numpy as np
 import scipy.linalg
 from os.path import dirname, join, abspath
@@ -21,10 +20,10 @@ class NMPC_Controller:
         # 数据记录
         self.data_log = []
 
-        self.Tf = 0.5                       # 预测时间长度(s) - 降低以提高求解速度
+        self.Tf = 0.6                       # 预测时间长度(s) - 稍加长以提升前瞻性、减小振荡
         self.N = 30                         # 预测步数(节点数量) - 降低以提高稳定性
         self.nx = self.model.x.size()[0]    # 状态维度 13维度
-        self.nu = self.model.u.size()[0]    # 控制输入维度 4维度
+        self.nu = self.model.u.size()[0]    # 控制输入维度 5维度 (w1,w2,w3,w4,yaw_bias)
         self.ny = self.nx + self.nu         # 评估维度
         self.ny_e = self.nx                 # 终端评估维度
 
@@ -38,35 +37,42 @@ class NMPC_Controller:
         self.Ct  = 0.1757   # [N/krpm^2] Thrust coef
 
         # bounds
-        self.hov_w = np.sqrt((self.mq*self.g0)/(4*self.Ct))  # 悬停时单个电机推力
+        # 注意：本模型里 NMPC 的 4 个“基准电机转速”会通过 yaw_bias 混控生成 8 个实际电机转速参与推力。
+        # yaw_bias=0 且 w1=w2=w3=w4=w 时，总推力 = Ct * 8 * w^2，因此悬停应使用 8 电机公式。
+        self.hov_w = np.sqrt((self.mq * self.g0) / (8 * self.Ct))
         print(f"hovor speed: {self.hov_w} krpm")
         # hovor speed: 15.777730167256925 krpm
 
-        self.max_speed = 30.0  # 电机最高转速(krpm) - 增加以提供更大控制余量
+        # MuJoCo 执行端 calc_motor_input() 会将电机转速硬限幅到 22krpm。
+        # 约束需要与执行端一致，否则 NMPC 会规划不可实现的推力，导致 z 通道振荡/发散。
+        self.max_speed = 22.0
 
         # set weighting matrices 状态权重矩阵
         Q = np.eye(self.nx)
-        Q[0,0] = 60.0        # x - 适度降低，优先保持姿态稳定
-        Q[1,1] = 60.0        # y
-        Q[2,2] = 150.0       # z - 增加以减小稳态误差
+        Q[0,0] = 160.0        # x - 适度降低，优先保持姿态稳定
+        Q[1,1] = 160.0        # y
+        Q[2,2] = 260 # 150.0       # z - 再提高：继续压稳态误差
         # 姿态权重 (约束飞行器保持水平姿态) - 极其重要！
-        Q[3,3] = 0.0         # qw (标量部分，通常不直接约束)
+        Q[3,3] = 10.0        # qw - 给一点权重避免姿态/符号漂移
         Q[4,4] = 60.0        # qx (roll) - 增加以提高抗干扰性
         Q[5,5] = 80.0        # qy (pitch) - 增加以提高抗干扰性
-        Q[6,6] = 50.0        # qz (yaw) - 增加以减小yaw误差
-        Q[7,7] = 10.0        # vbx - 适度约束速度
-        Q[8,8] = 10.0        # vby
-        Q[9,9] = 30.0        # vbz - 降低以允许更大速度响应
-        Q[10,10] = 30.0      # wx - 增加以提高抗干扰性
-        Q[11,11] = 40.0      # wy - 增加以提高抗干扰性
-        Q[12,12] = 100.0     # wz - 大幅增加以改善yaw控制
+        Q[6,6] = 60.0        # qz (yaw) - 提高：抑制偏航漂移/发散
+        # XY 不稳定/来回摆动时，最有效的是加“横向速度阻尼”
+        Q[7,7] = 80.0        # vbx
+        Q[8,8] = 80.0        # vby
+        Q[9,9] = 220.0       # vbz - 再加阻尼：优先抑制 z 超调/回弹
+        # 同时增加滚转/俯仰角速度阻尼，避免“摆杆式”横向振荡
+        Q[10,10] = 120.0     # wx
+        Q[11,11] = 120.0     # wy
+        Q[12,12] = 80.0      # wz - 提高：给偏航角速度更多阻尼，避免发散
 
         R = np.eye(self.nu)   # 控制输入权重矩阵
-        R[0,0] = 0.5         # w_front - 适度约束，避免控制过激
-        R[1,1] = 0.5         # w_left
-        R[2,2] = 0.5         # w_rear
-        R[3,3] = 0.5         # w_right
-        R[4,4] = 0.02        # yaw_bias - 降低以允许更激进的yaw控制
+        # 若 XY 仍有高频抖动，可适度增大电机输入惩罚（过大则会“发软”）
+        R[0,0] = 1.10
+        R[1,1] = 1.10
+        R[2,2] = 1.10
+        R[3,3] = 1.10
+        R[4,4] = 0.50 # yaw_bias - 再增：避免贴边抽搐导致偏航发散
 
         self.ocp.cost.W = scipy.linalg.block_diag(Q, R)
 
@@ -94,7 +100,7 @@ class NMPC_Controller:
         Vu[17,4] = 1.0
         self.ocp.cost.Vu = Vu
 
-        self.ocp.cost.W_e = 50.0 * Q
+        self.ocp.cost.W_e = 10.0 * Q
 
         Vx_e = np.zeros((self.ny_e, self.nx))
         Vx_e[0,0] = 1.0
@@ -112,7 +118,7 @@ class NMPC_Controller:
         Vx_e[12,12] = 1.0
         self.ocp.cost.Vx_e = Vx_e
 
-        # 过程参考向量(状态+输入)
+        # 过程参考向量(状态+输入) —— 4 桨悬停 + yaw_bias=0
         self.ocp.cost.yref   = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, self.hov_w, self.hov_w, self.hov_w, self.hov_w, 0.0])
         # 终端参考向量(状态)
         self.ocp.cost.yref_e = np.array([0.0, 0.0, 0.0, 1.0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
@@ -139,10 +145,64 @@ class NMPC_Controller:
         
         # 设置参数初始值 (扰动力和力矩: [fx, fy, fz, mx, my, mz])
         self.ocp.parameter_values = np.zeros(6)  # 默认零扰动
+
+        # 记录上一帧期望航向，避免目标在正上方/脚下时 yaw 角抖动
+        self.last_desired_yaw = 0.0
         
         # 构建编译OCP求解器
         self.acados_solver = AcadosOcpSolver(self.ocp, json_file = 'acados_ocp.json')
         print("NMPC Controller Init Done")
+
+    def referen_state_transition(self, current_state, goal_state):
+        """分两步靠னர்目标: 先稳定偏航，再平移到目标。
+
+        目的：避免 goal_state 姿态恒为 yaw=0 导致偏航在换点/机动时发散，
+        并在目标几乎正上方/脚下时冻结期望 yaw 防止抖动。
+        """
+
+        def _yaw_from_quat(q):
+            qw, qx, qy, qz = q
+            return np.arctan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz))
+
+        def _quat_from_yaw(yaw):
+            half = 0.5 * yaw
+            return np.array([np.cos(half), 0.0, 0.0, np.sin(half)])
+
+        def _wrap_pi(angle):
+            return (angle + np.pi) % (2 * np.pi) - np.pi
+
+        pos_cur = current_state[0:3]
+        quat_cur = current_state[3:7]
+        pos_goal = goal_state[0:3]
+
+        target_vec = pos_goal - pos_cur
+        planar_norm = np.linalg.norm(target_vec[:2])
+
+        current_yaw = _yaw_from_quat(quat_cur)
+
+        # xy 太近：冻结 yaw（沿用上一帧期望），防止抖动
+        yaw_deadband = 0.10  # m
+        if planar_norm < yaw_deadband:
+            desired_yaw = self.last_desired_yaw
+            desired_yaw = goal_state[6]  # 直接沿用目标 yaw
+        else:
+            desired_yaw = np.arctan2(target_vec[1], target_vec[0])
+            self.last_desired_yaw = desired_yaw
+
+        yaw_err = _wrap_pi(desired_yaw - current_yaw)
+        yaw_threshold = np.deg2rad(10.0)
+
+        new_goal = goal_state.copy()
+        new_goal[3:7] = _quat_from_yaw(desired_yaw)
+
+        # 偏航误差大：原地转向（减少 yaw_bias/姿态与位置耦合造成的发散）
+        if abs(yaw_err) > yaw_threshold:
+            new_goal[0:3] = pos_cur
+            new_goal[7:13] = 0.0
+        else:
+            new_goal[10:13] = 0.0
+
+        return new_goal
 
     # 状态空间位点控制
     # current_state当前状态: [x, y, z, qw, qx, qy, qz, vbx, vby, vbz, wx, wy, wz] 
@@ -154,7 +214,11 @@ class NMPC_Controller:
         self.acados_solver.set(0, 'lbx', current_state)
         self.acados_solver.set(0, 'ubx', current_state)
 
-        y_ref = np.concatenate((goal_state, np.array([self.hov_w, self.hov_w, self.hov_w, self.hov_w, 0.0])))
+        goal_state = self.referen_state_transition(current_state, goal_state)
+
+        y_ref = np.concatenate((goal_state, np.array([
+            self.hov_w, self.hov_w, self.hov_w, self.hov_w, 0.0
+        ])))
         # Set Goal State
         for i in range(self.N):
             self.acados_solver.set(i, 'yref', y_ref)   # 过程参考

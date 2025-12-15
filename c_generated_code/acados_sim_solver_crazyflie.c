@@ -73,7 +73,7 @@ int crazyflie_acados_sim_create(crazyflie_sim_solver_capsule * capsule)
     const int np = CRAZYFLIE_NP;
     bool tmp_bool;
 
-    double Tsim = 0.016666666666666666;
+    double Tsim = 0.02;
 
     external_function_opts ext_fun_opts;
     external_function_opts_set_to_default(&ext_fun_opts);

@@ -125,6 +125,7 @@ def export_model_underwater():
     _thrust_accx_w = (R00*fx_b + R01*fy_b + R02*fz_b) / mass
     _thrust_accy_w = (R10*fx_b + R11*fy_b + R12*fz_b) / mass
     _thrust_accz_w = (R20*fx_b + R21*fy_b + R22*fz_b) / mass
+
     # _thrust_acc_b = Ct*(w1**2 + w2**2 + w3**2 + w4**2 + w5**2 + w6**2 + w7**2 + w8**2) / mass  # 机体坐标系中推力引起的加速度
     # # 将机体坐标系推力加速度转换为世界坐标系推力加速度
     # # Rwb * [0, 0, _thrust_acc_b]

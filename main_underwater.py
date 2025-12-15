@@ -25,27 +25,31 @@ arm_length = 0.605/2.0  # 电机力臂长度 单位m
 max_thrust = 17.75     # 单个电机最大推力 单位N (电机最大转速22krpm)
 max_torque = 0.02  # 单个电机最大扭矩 单位Nm (电机最大转速22krpm)
 left_servo_offset = -0.1
-right_servo_offset = -0.25
+right_servo_offset = -0.0
 # 仿真周期 100Hz 10ms 0.01s
 dt = 0.01
 
 # 根据电机转速计算电机推力
 def calc_motor_force(krpm):
     global Ct
-    return Ct * krpm**2
+    return Ct * krpm * np.abs(krpm)
 
 # 根据电机转速计算电机归一化输入
-def calc_motor_input(krpm):
-    if krpm > 22:
-        krpm = 22
-    elif krpm < 0:
-        krpm = 0
+# 偶数索引电机（0,2,4,6）保持单向推力，奇数索引电机允许反向（-1~1）
+def calc_motor_input(krpm, idx):
+    krpm = np.clip(krpm, -22.0, 22.0)
+
+    # 计算推力（带符号），再按最大正向推力归一化
     _force = calc_motor_force(krpm)
-    _input = _force / max_thrust
-    if _input > 1:
-        _input = 1
-    elif _input < 0:
-        _input = 0
+    _input = _force / max_thrust  # 期望范围约 [-1, 1]
+
+    if idx % 2 == 0:
+        # 单向：只保留推力方向
+        _input = max(_input, 0.0)
+    else:
+        # 允许反向：夹到 [-1, 1]
+        _input = np.clip(_input, -1.0, 1.0)
+
     return _input
 
 # 全局变量用于键盘输入
@@ -110,7 +114,6 @@ def control_callback(m, d):
     goal_position = trajectory_gen.get_reference(d.time)
 
     # NMPC Update（获取扰动补偿可选）
-    k_yaw = 0.8
     # 获取扰动估计（可选用于前馈补偿）
     if eso_enable:
         disturbance = eso.get_all_disturbances(filtered=True)
@@ -119,22 +122,29 @@ def control_callback(m, d):
     _dt, _control = controller.nmpc_position_control(current_state, goal_position, disturbance)
     # 计算实际的8个电机转速
     motor_speeds = np.array([
-        _control[0] - k_yaw * _control[4],  # motor0: Front上,CW
-        _control[1] + k_yaw * _control[4],  # motor1: Left上,CCW
-        _control[2] - k_yaw * _control[4],  # motor2: Rear上,CW
-        _control[3] + k_yaw * _control[4],  # motor3: Right上,CCW
-        _control[0] + k_yaw * _control[4],  # motor4: Front下,CCW
-        _control[1] - k_yaw * _control[4],  # motor5: Left下,CW
-        _control[2] + k_yaw * _control[4],  # motor6: Rear下,CCW
-        _control[3] - k_yaw * _control[4],  # motor7: Right下,CW
+        _control[0],  # motor0: Front上,CW
+        _control[1],  # motor1: Left上,CCW
+        _control[2],  # motor2: Rear上,CW
+        _control[3],  # motor3: Right上,CCW
+        _control[4],  # motor4: Front下,CCW
+        _control[5],  # motor5: Left下,CW
+        _control[6],  # motor6: Rear下,CCW
+        _control[7],  # motor7: Right下,CW
     ])
+
+    # 测试用例：全部电机关闭
+    # motor_speeds = np.zeros_like(motor_speeds)
     
     # 应用电机控制
     for i in range(8):
-        d.actuator(f'prop_motor{i}').ctrl[0] = calc_motor_input(motor_speeds[i])
+        d.actuator(f'prop_motor{i}').ctrl[0] = calc_motor_input(motor_speeds[i], i)
 
-    d.actuator('left_servo').ctrl[0] = 0.0 + left_servo_offset   # ~90 degrees
-    d.actuator('right_servo').ctrl[0] = 0.0 + right_servo_offset
+    d.actuator('left_servo').ctrl[0] = _control[8] + left_servo_offset   # ~90 degrees
+    d.actuator('right_servo').ctrl[0] = _control[9] + right_servo_offset
+
+    # 测试用例：舵机固定位置
+    # d.actuator('left_servo').ctrl[0] = np.pi/2 + left_servo_offset   # ~90 degrees
+    # d.actuator('right_servo').ctrl[0] = np.pi/2 + right_servo_offset
     
     # ========== 更新ESO观测器（仅在启用时） ==========
     if eso_enable:
