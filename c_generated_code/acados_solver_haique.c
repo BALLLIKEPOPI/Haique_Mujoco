@@ -493,17 +493,17 @@ void haique_acados_setup_nlp_in(haique_solver_capsule* capsule, const int N, dou
 
    double* W_0 = calloc(NY0*NY0, sizeof(double));
     // change only the non-zero elements:
-    W_0[0+(NY0) * 0] = 60;
-    W_0[1+(NY0) * 1] = 60;
-    W_0[2+(NY0) * 2] = 150;
-    W_0[4+(NY0) * 4] = 60;
-    W_0[5+(NY0) * 5] = 100;
-    W_0[6+(NY0) * 6] = 50;
-    W_0[7+(NY0) * 7] = 10;
-    W_0[8+(NY0) * 8] = 10;
-    W_0[9+(NY0) * 9] = 30;
-    W_0[10+(NY0) * 10] = 30;
-    W_0[11+(NY0) * 11] = 40;
+    W_0[0+(NY0) * 0] = 200;
+    W_0[1+(NY0) * 1] = 200;
+    W_0[2+(NY0) * 2] = 500;
+    W_0[4+(NY0) * 4] = 200;
+    W_0[5+(NY0) * 5] = 200;
+    W_0[6+(NY0) * 6] = 100;
+    W_0[7+(NY0) * 7] = 50;
+    W_0[8+(NY0) * 8] = 50;
+    W_0[9+(NY0) * 9] = 100;
+    W_0[10+(NY0) * 10] = 50;
+    W_0[11+(NY0) * 11] = 50;
     W_0[12+(NY0) * 12] = 100;
     W_0[13+(NY0) * 13] = 0.5;
     W_0[14+(NY0) * 14] = 0.5;
@@ -513,8 +513,8 @@ void haique_acados_setup_nlp_in(haique_solver_capsule* capsule, const int N, dou
     W_0[18+(NY0) * 18] = 0.5;
     W_0[19+(NY0) * 19] = 0.5;
     W_0[20+(NY0) * 20] = 0.5;
-    W_0[21+(NY0) * 21] = 0.1;
-    W_0[22+(NY0) * 22] = 0.1;
+    W_0[21+(NY0) * 21] = 2;
+    W_0[22+(NY0) * 22] = 2;
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, 0, "W", W_0);
     free(W_0);
     double* Vx_0 = calloc(NY0*NX, sizeof(double));
@@ -563,17 +563,17 @@ void haique_acados_setup_nlp_in(haique_solver_capsule* capsule, const int N, dou
     free(yref);
     double* W = calloc(NY*NY, sizeof(double));
     // change only the non-zero elements:
-    W[0+(NY) * 0] = 60;
-    W[1+(NY) * 1] = 60;
-    W[2+(NY) * 2] = 150;
-    W[4+(NY) * 4] = 60;
-    W[5+(NY) * 5] = 100;
-    W[6+(NY) * 6] = 50;
-    W[7+(NY) * 7] = 10;
-    W[8+(NY) * 8] = 10;
-    W[9+(NY) * 9] = 30;
-    W[10+(NY) * 10] = 30;
-    W[11+(NY) * 11] = 40;
+    W[0+(NY) * 0] = 200;
+    W[1+(NY) * 1] = 200;
+    W[2+(NY) * 2] = 500;
+    W[4+(NY) * 4] = 200;
+    W[5+(NY) * 5] = 200;
+    W[6+(NY) * 6] = 100;
+    W[7+(NY) * 7] = 50;
+    W[8+(NY) * 8] = 50;
+    W[9+(NY) * 9] = 100;
+    W[10+(NY) * 10] = 50;
+    W[11+(NY) * 11] = 50;
     W[12+(NY) * 12] = 100;
     W[13+(NY) * 13] = 0.5;
     W[14+(NY) * 14] = 0.5;
@@ -583,8 +583,8 @@ void haique_acados_setup_nlp_in(haique_solver_capsule* capsule, const int N, dou
     W[18+(NY) * 18] = 0.5;
     W[19+(NY) * 19] = 0.5;
     W[20+(NY) * 20] = 0.5;
-    W[21+(NY) * 21] = 0.1;
-    W[22+(NY) * 22] = 0.1;
+    W[21+(NY) * 21] = 2;
+    W[22+(NY) * 22] = 2;
 
     for (int i = 1; i < N; i++)
     {
@@ -633,17 +633,17 @@ void haique_acados_setup_nlp_in(haique_solver_capsule* capsule, const int N, dou
 
     double* W_e = calloc(NYN*NYN, sizeof(double));
     // change only the non-zero elements:
-    W_e[0+(NYN) * 0] = 3000;
-    W_e[1+(NYN) * 1] = 3000;
-    W_e[2+(NYN) * 2] = 7500;
-    W_e[4+(NYN) * 4] = 3000;
-    W_e[5+(NYN) * 5] = 5000;
-    W_e[6+(NYN) * 6] = 2500;
-    W_e[7+(NYN) * 7] = 500;
-    W_e[8+(NYN) * 8] = 500;
-    W_e[9+(NYN) * 9] = 1500;
-    W_e[10+(NYN) * 10] = 1500;
-    W_e[11+(NYN) * 11] = 2000;
+    W_e[0+(NYN) * 0] = 10000;
+    W_e[1+(NYN) * 1] = 10000;
+    W_e[2+(NYN) * 2] = 25000;
+    W_e[4+(NYN) * 4] = 10000;
+    W_e[5+(NYN) * 5] = 10000;
+    W_e[6+(NYN) * 6] = 5000;
+    W_e[7+(NYN) * 7] = 2500;
+    W_e[8+(NYN) * 8] = 2500;
+    W_e[9+(NYN) * 9] = 5000;
+    W_e[10+(NYN) * 10] = 2500;
+    W_e[11+(NYN) * 11] = 2500;
     W_e[12+(NYN) * 12] = 5000;
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, N, "W", W_e);
     free(W_e);

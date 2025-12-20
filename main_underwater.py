@@ -13,9 +13,6 @@ controller = NMPC_Controller()
 # 新建轨迹生成器
 trajectory_gen = TrajectoryGenerator()
 
-# 新建ESO扰动观测器
-eso = ESO_Observer()
-
 gravity = 9.8066        # 重力加速度 单位m/s^2
 mass = 4.672            # 飞行器质量 单位kg
 Ct = 0.1757            # 电机推力系数 (N/krpm^2)
@@ -26,8 +23,12 @@ max_thrust = 17.75     # 单个电机最大推力 单位N (电机最大转速22k
 max_torque = 0.02  # 单个电机最大扭矩 单位Nm (电机最大转速22krpm)
 left_servo_offset = -0.1
 right_servo_offset = -0.0
+
 # 仿真周期 100Hz 10ms 0.01s
 dt = 0.01
+
+# 新建ESO扰动观测器
+eso = ESO_Observer(mode='underwater', dt=dt)
 
 # 根据电机转速计算电机推力
 def calc_motor_force(krpm):
@@ -81,34 +82,27 @@ def rotation_matrix(q0, q1, q2, q3):
 
 log_count = 0
 eso_enable = True  # 默认启用ESO（可通过命令行参数修改）
+last_control = np.zeros(10) # 存储上一时刻的控制量
+last_quat_main = np.array([1.0, 0.0, 0.0, 0.0])
 
 def control_callback(m, d):
-    global log_count, gravity, mass, controller, trajectory_gen, eso, eso_enable
+    global log_count, gravity, mass, controller, trajectory_gen, eso, eso_enable, last_control, last_quat_main
 
     pos = d.qpos[:3]        # [x, y, z]
     quat = d.qpos[3:7]      # [qw, qx, qy, qz]
     vel = d.qvel[:3]        # [vx, vy, vz]
     omega = d.qvel[3:6]     # [wx, wy, wz]
+    state_obs = d.qvel[:6]
+
+    if np.dot(quat, last_quat_main) < 0:
+        quat = -quat
+    last_quat_main = quat.copy()
 
     current_state = np.concatenate([pos, quat, vel, omega])
 
-    _pos = d.qpos
-    _vel = d.qvel
-    _sensor_data = d.sensordata
-    gyro_x = _sensor_data[0]
-    gyro_y = _sensor_data[1]
-    gyro_z = _sensor_data[2]
-    acc_x = _sensor_data[3]
-    acc_y = _sensor_data[4]
-    acc_z = _sensor_data[5]
-    quat_w = _sensor_data[6]
-    quat_x = _sensor_data[7]
-    quat_y = _sensor_data[8]
-    quat_z = _sensor_data[9]
-    quat = np.array([quat_x, quat_y, quat_z, quat_w])  # x y z w
-    omega = np.array([gyro_x, gyro_y, gyro_z])         # 角速度
-    # 构建当前状态
-    current_state = np.array([_pos[0], _pos[1], _pos[2], quat[3], quat[0], quat[1], quat[2], _vel[0], _vel[1], _vel[2], omega[0], omega[1], omega[2]])
+    # 构建当前状态 for Controller (matches nmpc_controller expectations)
+    # [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz]
+    current_state = np.concatenate([pos, quat, vel, omega])
     
     # 从轨迹生成器获取目标位置
     goal_position = trajectory_gen.get_reference(d.time)
@@ -116,10 +110,18 @@ def control_callback(m, d):
     # NMPC Update（获取扰动补偿可选）
     # 获取扰动估计（可选用于前馈补偿）
     if eso_enable:
-        disturbance = eso.get_all_disturbances(filtered=True)
+        # 使用上一时刻的控制量更新ESO
+        dist_f, dist_m = eso.update(state_obs, last_control, quat)
+        disturbance = {
+            'force': dist_f,
+            'torque': dist_m
+        }
     else:
         disturbance = None
+        
     _dt, _control = controller.nmpc_position_control(current_state, goal_position, disturbance)
+    last_control = _control.copy()
+    
     # 计算实际的8个电机转速
     motor_speeds = np.array([
         _control[0],  # motor0: Front上,CW
@@ -146,68 +148,12 @@ def control_callback(m, d):
     # d.actuator('left_servo').ctrl[0] = np.pi/2 + left_servo_offset   # ~90 degrees
     # d.actuator('right_servo').ctrl[0] = np.pi/2 + right_servo_offset
     
-    # ========== 更新ESO观测器（仅在启用时） ==========
-    if eso_enable:
-        # 计算控制力和力矩（body frame）
-        # 从电机转速计算总推力和力矩
-        w_squared = motor_speeds**2  # 转速平方
-        
-        # 总推力 (body z轴方向)
-        total_thrust = Ct * np.sum(w_squared)
-        control_force_body = np.array([0.0, 0.0, total_thrust])
-        
-        # 控制力矩 [mx, my, mz]
-        # 电机位置 (x, y) 相对于质心
-        motor_positions = np.array([
-            [arm_length, 0],      # motor0: Front
-            [0, arm_length],      # motor1: Left
-            [-arm_length, 0],     # motor2: Rear
-            [0, -arm_length],     # motor3: Right
-            [arm_length, 0],      # motor4: Front
-            [0, arm_length],      # motor5: Left
-            [-arm_length, 0],     # motor6: Rear
-            [0, -arm_length],     # motor7: Right
-        ])
-        
-        # Roll力矩 (绕x轴): 左右电机推力差
-        mx = Ct * (motor_positions[1,1] * (w_squared[1] + w_squared[5]) - 
-                   motor_positions[3,1] * (w_squared[3] + w_squared[7]))
-        
-        # Pitch力矩 (绕y轴): 前后电机推力差
-        my = Ct * (-motor_positions[0,0] * (w_squared[0] + w_squared[4]) + 
-                    motor_positions[2,0] * (w_squared[2] + w_squared[6]))
-        
-        # Yaw力矩 (绕z轴): 反扭力矩
-        # CW: motor0, 2, 5, 7  (负)
-        # CCW: motor1, 3, 4, 6 (正)
-        mz = Cd * (-w_squared[0] + w_squared[1] - w_squared[2] + w_squared[3] + 
-                    w_squared[4] - w_squared[5] + w_squared[6] - w_squared[7])
-        
-        control_torque_body = np.array([mx, my, mz])
-        
-        # 四元数转欧拉角
-        qw, qx, qy, qz = quat[3], quat[0], quat[1], quat[2]
-        roll = np.arctan2(2*(qw*qx + qy*qz), 1 - 2*(qx**2 + qy**2))
-        pitch = np.arcsin(2*(qw*qy - qz*qx))
-        yaw = np.arctan2(2*(qw*qz + qx*qy), 1 - 2*(qy**2 + qz**2))
-        euler_angles = np.array([roll, pitch, yaw])
-        
-        # 更新ESO
-        dt = m.opt.timestep
-        eso.update(position=_pos[:3], 
-                  velocity=_vel[:3],
-                  euler_angles=euler_angles,
-                  angular_velocity=omega,
-                  control_force=control_force_body,
-                  control_torque=control_torque_body,
-                  dt=dt)
-    
     log_count += 1
     if log_count >= 50:
         log_count = 0
         # 输出扰动估计（仅在ESO启用时）
         if eso_enable:
-            dist = eso.get_all_disturbances(filtered=True)
+            dist = disturbance
             # print(f"扰动力: {dist['force']}, 扰动力矩: {dist['torque']}")
 
 if __name__ == '__main__':

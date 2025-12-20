@@ -13,13 +13,13 @@ class TrajectoryGenerator:
         
         # 圆形轨迹参数
         self.circle_center = np.array([0.0, 0.0, 1.0])
-        self.circle_radius = 0.5  # 半径0.5m
-        self.circle_period = 10.0  # 10秒一圈
+        self.circle_radius = 1.0  # 半径1.0m
+        self.circle_period = 20.0  # 20秒一圈
         
         # 方形轨迹参数
         self.square_center = np.array([0.0, 0.0, 1.0])
-        self.square_size = 0.8  # 边长0.8m
-        self.square_period = 16.0  # 16秒一圈（每条边4秒）
+        self.square_size = 3  # 边长3m
+        self.square_period = 25.0  # 25秒一圈（每条边6.25秒）
         
         # 连续爬升参数
         self.climb_start_height = 0.0  # 起始高度（从地面开始）
@@ -78,6 +78,38 @@ class TrajectoryGenerator:
         self.last_position = final_pos.copy()
         
         return final_pos
+
+    def get_reference_state(self, time):
+        """根据当前时间和模式生成参考状态（位置+速度）。
+
+        返回:
+            pos: np.ndarray shape (3,)
+            vel: np.ndarray shape (3,)
+        """
+        self.current_time = time
+
+        if self.mode == 'hover':
+            target_pos = self._hover_trajectory()
+            target_vel = np.zeros(3)
+        elif self.mode == 'circle':
+            target_pos, target_vel = self._circle_trajectory_state()
+        elif self.mode == 'square':
+            target_pos, target_vel = self._square_trajectory_state()
+        elif self.mode == 'climb':
+            target_pos, target_vel = self._climb_trajectory_state()
+        else:
+            target_pos = self.hover_position.copy()
+            target_vel = np.zeros(3)
+
+        # 过渡期位置用插值；速度前馈在过渡期置零，避免目标速度跳变
+        final_pos = self._apply_transition(target_pos)
+        if (self.current_time - self.start_time) < self.transition_duration:
+            final_vel = np.zeros(3)
+        else:
+            final_vel = target_vel
+
+        self.last_position = final_pos.copy()
+        return final_pos, final_vel
     
     def _apply_transition(self, target_pos):
         """应用平滑过渡从当前位置到目标轨迹"""
@@ -120,6 +152,68 @@ class TrajectoryGenerator:
         z = self.circle_center[2]
         
         return np.array([x, y, z])
+
+    def _circle_trajectory_state(self):
+        """圆形轨迹（位置+解析速度）"""
+        t = self.current_time - self.start_time
+
+        if t < self.transition_duration:
+            theta = 0.0
+            omega = 0.0
+        else:
+            t_actual = t - self.transition_duration
+            omega = 2 * np.pi / self.circle_period
+            theta = omega * t_actual
+
+        x = self.circle_center[0] + self.circle_radius * np.cos(theta)
+        y = self.circle_center[1] + self.circle_radius * np.sin(theta)
+        z = self.circle_center[2]
+
+        vx = -self.circle_radius * omega * np.sin(theta)
+        vy =  self.circle_radius * omega * np.cos(theta)
+        vz = 0.0
+
+        return np.array([x, y, z]), np.array([vx, vy, vz])
+
+    def _square_trajectory_state(self):
+        """方形轨迹（位置+近似速度）。"""
+        # 为了保持简单：过渡期速度置零；过渡完成后按分段常速度给前馈。
+        t = self.current_time - self.start_time
+        pos = self._square_trajectory()
+        if t < self.transition_duration:
+            return pos, np.zeros(3)
+
+        half_size = self.square_size / 2.0
+        t_actual = t - self.transition_duration
+        seg_time = self.square_period / 4.0
+        vmag = (2.0 * half_size) / seg_time
+
+        t_norm = (t_actual % self.square_period)
+        seg = int(t_norm // seg_time)
+
+        if seg == 0:      # 右边：y 递增
+            vel = np.array([0.0, vmag, 0.0])
+        elif seg == 1:    # 上边：x 递减
+            vel = np.array([-vmag, 0.0, 0.0])
+        elif seg == 2:    # 左边：y 递减
+            vel = np.array([0.0, -vmag, 0.0])
+        else:             # 下边：x 递增
+            vel = np.array([vmag, 0.0, 0.0])
+
+        return pos, vel
+
+    def _climb_trajectory_state(self):
+        """爬升轨迹（位置+速度）"""
+        t = self.current_time - self.start_time
+        pos = self._climb_trajectory()
+
+        height_diff = self.climb_target_height - self.climb_start_height
+        total_climb_time = abs(height_diff) / self.climb_speed
+        if 0.0 < t < total_climb_time:
+            vz = np.sign(height_diff) * self.climb_speed
+        else:
+            vz = 0.0
+        return pos, np.array([0.0, 0.0, vz])
     
     def _square_trajectory(self):
         """方形轨迹"""

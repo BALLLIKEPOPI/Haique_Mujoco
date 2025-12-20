@@ -153,6 +153,15 @@ class NMPC_Controller:
         
         # 设置参数初始值 (扰动力和力矩: [fx, fy, fz, mx, my, mz])
         self.ocp.parameter_values = np.zeros(6)  # 默认零扰动
+
+        # 记录上一帧期望航向，避免目标在正上方/脚下时 yaw 角抖动
+        self.last_desired_yaw = 0.0
+
+        # 记录上一帧期望四元数，用于符号连续化（q 与 -q 表示同一姿态）
+        self.last_desired_quat = np.array([1.0, 0.0, 0.0, 0.0])
+
+        # 调试开关：True 时打印参考信息（高频打印会明显拖慢仿真）
+        self.debug = False
         
         # 构建编译OCP求解器
         self.acados_solver = AcadosOcpSolver(self.ocp, json_file = 'acados_ocp.json')
@@ -176,6 +185,9 @@ class NMPC_Controller:
         def _wrap_pi(angle):
             return (angle + np.pi) % (2 * np.pi) - np.pi
 
+        def _unwrap_angle(prev, cur_wrapped):
+            return prev + _wrap_pi(cur_wrapped - prev)
+
         pos_cur = current_state[0:3]
         quat_cur = current_state[3:7]
         pos_goal = goal_state[0:3]
@@ -187,26 +199,66 @@ class NMPC_Controller:
 
         # xy 太近：冻结 yaw（沿用上一帧期望），防止抖动
         yaw_deadband = 0.10  # m
+        v_ref = goal_state[7:10]
+        v_norm = float(np.linalg.norm(v_ref[:2]))
         if planar_norm < yaw_deadband:
-            desired_yaw = self.last_desired_yaw
-            desired_yaw = goal_state[6]  # 直接沿用目标 yaw
+            if v_norm > 1e-3:
+                desired_yaw = self.last_desired_yaw
+                if self.debug:
+                    print("  >> XY近距且有参考速度，冻结期望 yaw")
+            else:
+                desired_yaw_quat = _yaw_from_quat(goal_state[3:7])
+                desired_yaw = _unwrap_angle(self.last_desired_yaw, desired_yaw_quat)
+                if self.debug:
+                    print("  >> XY近距且无参考速度，使用目标向量期望 yaw: ", desired_yaw)
+            self.last_desired_yaw = desired_yaw
         else:
-            desired_yaw = np.arctan2(target_vec[1], target_vec[0])
+            # 优先用参考速度方向作为期望 yaw（圆轨迹更自然，且避免“追点”带来的相位滞后）
+            if v_norm > 1e-3:
+                desired_yaw_wrapped = np.arctan2(v_ref[1], v_ref[0])
+                if self.debug:
+                    print("  >> 使用参考速度方向作为期望 yaw")
+            else:
+                desired_yaw_wrapped = np.arctan2(target_vec[1], target_vec[0])
+                if self.debug:
+                    print("  >> 使用目标向量方向作为期望 yaw")
+
+            desired_yaw = _unwrap_angle(self.last_desired_yaw, desired_yaw_wrapped)
             self.last_desired_yaw = desired_yaw
 
         yaw_err = _wrap_pi(desired_yaw - current_yaw)
         yaw_threshold = np.deg2rad(10.0)
+        yaw_freeze_max = np.deg2rad(45.0)
 
         new_goal = goal_state.copy()
-        new_goal[3:7] = _quat_from_yaw(desired_yaw)
+        desired_quat = _quat_from_yaw(desired_yaw)
 
-        # 偏航误差大：原地转向（减少 yaw_bias/姿态与位置耦合造成的发散）
-        if abs(yaw_err) > yaw_threshold:
-            new_goal[0:3] = pos_cur
-            new_goal[7:13] = 0.0
-        else:
-            new_goal[10:13] = 0.0
+        # 四元数符号连续化：避免从 [0,0,0,1] 突然跳到 [0,0,0,-1] 这类“等价但数值不连续”的翻转
+        if float(np.dot(desired_quat, self.last_desired_quat)) < 0.0:
+            desired_quat = -desired_quat
+        self.last_desired_quat = desired_quat
 
+        new_goal[3:7] = desired_quat
+
+        # 动态参考（例如圆轨迹）时不要用 yaw_err 去“冻结/缩小”平移目标。
+        # 否则会出现：某些相位 yaw 误差稍大 → alpha 很小 → 平移几乎停滞；
+        # 等 yaw 跟上后再突然追赶，视觉上像“半圈停住再继续”。
+        v_ref_xy_norm = float(np.linalg.norm(goal_state[7:9]))
+        is_dynamic_ref = v_ref_xy_norm > 1e-3
+
+        # 偏航误差大时降低平移意图（仅用于静态“追点”目标）
+        yaw_abs = abs(yaw_err)
+        if (not is_dynamic_ref) and (yaw_abs > yaw_threshold):
+            if yaw_abs >= yaw_freeze_max:
+                alpha = 0.0
+            else:
+                alpha = 1.0 - (yaw_abs - yaw_threshold) / (yaw_freeze_max - yaw_threshold)
+            new_goal[0:3] = pos_cur + alpha * (pos_goal - pos_cur)
+            new_goal[7:10] = alpha * new_goal[7:10]
+        new_goal[10:13] = 0.0
+
+        if self.debug:
+            print(f"New Goal Position: {new_goal[0:3]}", f"  Current Position: {pos_cur}")
         return new_goal
 
     # 状态空间位点控制

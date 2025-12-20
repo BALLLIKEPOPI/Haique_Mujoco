@@ -487,24 +487,24 @@ void crazyflie_acados_setup_nlp_in(crazyflie_solver_capsule* capsule, const int 
 
    double* W_0 = calloc(NY0*NY0, sizeof(double));
     // change only the non-zero elements:
-    W_0[0+(NY0) * 0] = 160;
-    W_0[1+(NY0) * 1] = 160;
+    W_0[0+(NY0) * 0] = 180;
+    W_0[1+(NY0) * 1] = 180;
     W_0[2+(NY0) * 2] = 260;
     W_0[3+(NY0) * 3] = 10;
     W_0[4+(NY0) * 4] = 60;
     W_0[5+(NY0) * 5] = 80;
-    W_0[6+(NY0) * 6] = 60;
+    W_0[6+(NY0) * 6] = 80;
     W_0[7+(NY0) * 7] = 80;
     W_0[8+(NY0) * 8] = 80;
-    W_0[9+(NY0) * 9] = 220;
+    W_0[9+(NY0) * 9] = 260;
     W_0[10+(NY0) * 10] = 120;
     W_0[11+(NY0) * 11] = 120;
     W_0[12+(NY0) * 12] = 80;
-    W_0[13+(NY0) * 13] = 1.1;
-    W_0[14+(NY0) * 14] = 1.1;
-    W_0[15+(NY0) * 15] = 1.1;
-    W_0[16+(NY0) * 16] = 1.1;
-    W_0[17+(NY0) * 17] = 0.5;
+    W_0[13+(NY0) * 13] = 0.95;
+    W_0[14+(NY0) * 14] = 0.95;
+    W_0[15+(NY0) * 15] = 0.95;
+    W_0[16+(NY0) * 16] = 0.95;
+    W_0[17+(NY0) * 17] = 0.4;
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, 0, "W", W_0);
     free(W_0);
     double* Vx_0 = calloc(NY0*NX, sizeof(double));
@@ -548,24 +548,24 @@ void crazyflie_acados_setup_nlp_in(crazyflie_solver_capsule* capsule, const int 
     free(yref);
     double* W = calloc(NY*NY, sizeof(double));
     // change only the non-zero elements:
-    W[0+(NY) * 0] = 160;
-    W[1+(NY) * 1] = 160;
+    W[0+(NY) * 0] = 180;
+    W[1+(NY) * 1] = 180;
     W[2+(NY) * 2] = 260;
     W[3+(NY) * 3] = 10;
     W[4+(NY) * 4] = 60;
     W[5+(NY) * 5] = 80;
-    W[6+(NY) * 6] = 60;
+    W[6+(NY) * 6] = 80;
     W[7+(NY) * 7] = 80;
     W[8+(NY) * 8] = 80;
-    W[9+(NY) * 9] = 220;
+    W[9+(NY) * 9] = 260;
     W[10+(NY) * 10] = 120;
     W[11+(NY) * 11] = 120;
     W[12+(NY) * 12] = 80;
-    W[13+(NY) * 13] = 1.1;
-    W[14+(NY) * 14] = 1.1;
-    W[15+(NY) * 15] = 1.1;
-    W[16+(NY) * 16] = 1.1;
-    W[17+(NY) * 17] = 0.5;
+    W[13+(NY) * 13] = 0.95;
+    W[14+(NY) * 14] = 0.95;
+    W[15+(NY) * 15] = 0.95;
+    W[16+(NY) * 16] = 0.95;
+    W[17+(NY) * 17] = 0.4;
 
     for (int i = 1; i < N; i++)
     {
@@ -615,16 +615,16 @@ void crazyflie_acados_setup_nlp_in(crazyflie_solver_capsule* capsule, const int 
 
     double* W_e = calloc(NYN*NYN, sizeof(double));
     // change only the non-zero elements:
-    W_e[0+(NYN) * 0] = 1600;
-    W_e[1+(NYN) * 1] = 1600;
+    W_e[0+(NYN) * 0] = 1800;
+    W_e[1+(NYN) * 1] = 1800;
     W_e[2+(NYN) * 2] = 2600;
     W_e[3+(NYN) * 3] = 100;
     W_e[4+(NYN) * 4] = 600;
     W_e[5+(NYN) * 5] = 800;
-    W_e[6+(NYN) * 6] = 600;
+    W_e[6+(NYN) * 6] = 800;
     W_e[7+(NYN) * 7] = 800;
     W_e[8+(NYN) * 8] = 800;
-    W_e[9+(NYN) * 9] = 2200;
+    W_e[9+(NYN) * 9] = 2600;
     W_e[10+(NYN) * 10] = 1200;
     W_e[11+(NYN) * 11] = 1200;
     W_e[12+(NYN) * 12] = 800;
