@@ -1,5 +1,5 @@
 <mujoco model="CF2 scene">
-  <include file="../../robots/haique.xml"/>
+  <include file="../robots/haique.xml"/>
 
   <option timestep="0.01"/>
   <statistic center="0 0 0.1" extent="0.2" meansize=".05"/>

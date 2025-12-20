@@ -1,0 +1,172 @@
+<mujoco model="haique_urdf_gen4">
+  <!-- Default settings inspired by CF2 quadrotor -->
+  <!-- <option integrator="RK4" density="1.225" viscosity="1.8e-5" timestep="0.002"/> -->
+  <option integrator="implicitfast" density="1000" viscosity="0.001" timestep="0.002"/>
+  <compiler angle="radian" inertiafromgeom="false" meshdir="/home/popi/haique_urdf_gen4/meshes/" autolimits="true"/>
+
+  <default>
+    <default class="haique">
+      <default class="visual">
+        <geom group="2" type="mesh" contype="0" conaffinity="0"/>
+      </default>
+      <default class="collision">
+        <geom group="3" type="mesh"/>
+      </default>
+      <site  group="5"/>
+    </default>
+  </default>
+
+  <asset>
+    <mesh name="base_link" file="base_link.STL"/>
+    <mesh name="motor0_link" file="motor0_link.STL"/>
+    <mesh name="motor4_link" file="motor4_link.STL"/>
+    <mesh name="motor2_link" file="motor2_link.STL"/>
+    <mesh name="motor6_link" file="motor6_link.STL"/>
+    <mesh name="left_arm_link" file="left_arm_link.STL"/>
+    <mesh name="motor1_link" file="motor1_link.STL"/>
+    <mesh name="motor5_link" file="motor5_link.STL"/>
+    <mesh name="right_arm_link" file="right_arm_link.STL"/>
+    <mesh name="motor3_link" file="motor3_link.STL"/>
+    <mesh name="motor7_link" file="motor7_link.STL"/>
+    <texture type="skybox" builtin="gradient" rgb1=".3 .5 .7" rgb2="0 0 0" width="512" height="512"/>
+    <texture name="grid" type="2d" builtin="checker" width="512" height="512" rgb1=".1 .2 .3" rgb2=".2 .3 .4"/>
+    <material name="grid" texture="grid" texrepeat="1 1" texuniform="true" reflectance=".2"/>
+  </asset>
+
+  <visual>
+    <map fogstart="1000" fogend="10000" force="0.1" znear="0.1"/>
+    <quality shadowsize="4096" offsamples="4"/>
+    <headlight ambient="0.4 0.4 0.4"/>
+  </visual>
+
+  <worldbody>
+    <light diffuse="0.5 0.5 0.5" pos="0 0 3" dir="0 0 -1"/> 
+    <geom name="floor" pos="0 0 0" size="0 0 0.05" type="plane" material="grid" condim="3"/>
+
+    <!-- Top-level free-floating body -->
+    <body name="robot" pos="0 0 0.2013" childclass="haique">
+      <freejoint/>
+      <!-- <inertial pos="0 0 0" quat="1 0 0 0" mass="4.81" diaginertia="0.05 0.05 0.08"/> -->
+
+      <!-- Base link body -->
+      <body name="base_link" pos="0 0 0">
+        <inertial pos="-0.00140375 0.00062119 -0.04602845" quat="1 0 0 0" mass="3.28806956" diaginertia="0.10359101 0.10411340 0.16095823"/>
+        <geom class="visual" rgba="0.8 0.8 0.8 1" mesh="base_link"/>
+        <geom class="collision" rgba="0.8 0.8 0.8 1" mesh="base_link"/>
+        <!-- IMU sensor site -->
+        <site name="imu" pos="0 0 0" size="0.005" rgba="0 1 0 1"/>
+      </body>
+      <body name="motor0_link" pos="0.3025 -0.0015 0.02">
+        <inertial pos="0 0 0.019082" quat="0.5 0.5 -0.5 0.5" mass="0.151298" diaginertia="7.93e-05 5.39e-05 5.39e-05"/>
+        <joint name="motor0_joint" pos="0 0 0" axis="0 0 1" range="0 3.1416"/>
+        <geom class="visual" mesh="motor0_link"/>
+        <geom class="collision" mesh="motor0_link"/>
+      </body>
+      <site name="motor0_site" pos="0.3025 -0.0015 0.061"  size="0.01" rgba="1 0 0 1"/>
+      <body name="motor4_link" pos="0.3025 -0.0015 -0.02">
+        <inertial pos="0 0 -0.019082" quat="0.5 0.5 -0.5 0.5" mass="0.151298" diaginertia="7.93e-05 5.39e-05 5.39e-05"/>
+        <joint name="motor4_joint" pos="0 0 0" axis="0 0 1" range="0 3.1416"/>
+        <geom class="visual" mesh="motor4_link"/>
+        <geom class="collision" mesh="motor4_link"/>
+      </body>
+      <site name="motor4_site" pos="0.3025 -0.0015 -0.061"  size="0.01" rgba="1 0 0 1"/>
+      <body name="motor2_link" pos="-0.3025 0.0015 0.02">
+        <inertial pos="0 0 0.019082" quat="0.5 0.5 -0.5 0.5" mass="0.151298" diaginertia="7.93e-05 5.39e-05 5.39e-05"/>
+        <joint name="motor2_joint" pos="0 0 0" axis="0 0 1" range="0 3.1416"/>
+        <geom class="visual" mesh="motor2_link"/>
+        <geom class="collision" mesh="motor2_link"/>
+      </body>
+      <site name="motor2_site" pos="-0.3025 0.0015 0.061"  size="0.01" rgba="1 0 0 1"/>
+      <body name="motor6_link" pos="-0.3025 0.0015 -0.02">
+        <inertial pos="0 0 -0.019082" quat="0.5 0.5 -0.5 0.5" mass="0.151298" diaginertia="7.93e-05 5.39e-05 5.39e-05"/>
+        <joint name="motor6_joint" pos="0 0 0" axis="0 0 1" range="0 3.1416"/>
+        <geom class="visual" mesh="motor6_link"/>
+        <geom class="collision" mesh="motor6_link"/>
+      </body>
+      <site name="motor6_site" pos="-0.3025 0.0015 -0.061"  size="0.01" rgba="1 0 0 1"/>
+      <body name="left_arm_link" pos="0 0.1015 0">
+        <inertial pos="-2.04e-06 0.159654 1.14e-05" quat="0.707008 0.707096 0.0087542 -0.0087967" mass="0.0869367" diaginertia="0.000672621 0.000671009 2.36e-05"/>
+        <joint name="left_arm_joint" pos="0 0 0" axis="0 1 0" range="-1.57 1.57" damping="0.5" armature="0.01"/>
+        <geom class="visual" mesh="left_arm_link"/>
+        <geom class="collision" mesh="left_arm_link"/>
+        <body name="motor1_link" pos="0.000462356 0.2005 0.0199947">
+          <inertial pos="0.00044097 0 0.0190769" quat="0.505792 0.505792 -0.49414 0.49414" mass="0.151298" diaginertia="7.93138e-05 5.39862e-05 5.39e-05"/>
+          <joint name="motor1_joint" pos="0 0 0" axis="-0.0231178 0 -0.999733" range="0 3.1416"/>
+          <geom class="visual" mesh="motor1_link"/>
+          <geom class="collision" mesh="motor1_link"/>
+        </body>
+        <body name="motor5_link" pos="-0.000462356 0.2005 -0.0199947">
+          <inertial pos="-0.00044099 0 -0.0190769" quat="0.505792 0.505792 -0.49414 0.49414" mass="0.151298" diaginertia="7.93138e-05 5.39862e-05 5.39e-05"/>
+          <joint name="motor5_joint" pos="0 0 0" axis="0.0231178 0 0.999733" range="0 3.1416"/>
+          <geom class="visual" mesh="motor5_link"/>
+          <geom class="collision" mesh="motor5_link"/>
+        </body>
+        <site name="motor1_site" pos="0.000462356 0.2005 0.061"  size="0.01" rgba="1 0 0 1"/>
+        <site name="motor5_site" pos="-0.000462356 0.2005 -0.061"  size="0.01" rgba="1 0 0 1"/>
+      </body>
+      <body name="right_arm_link" pos="0 -0.1015 0">
+        <inertial pos="1.57e-06 -0.159654 -1.045e-05" quat="0.706783 0.706883 0.0196581 -0.0196989" mass="0.0869367" diaginertia="0.000672625 0.000671005 2.356e-05"/>
+        <joint name="right_arm_joint" pos="0 0 0" axis="0 1 0" range="-1.57 1.57"/>
+        <geom class="visual" mesh="right_arm_link"/>
+        <geom class="collision" mesh="right_arm_link"/>
+        <body name="motor3_link" pos="0.00115134 -0.2005 0.0199668">
+          <inertial pos="0.00109833 0 0.0190503" quat="0.51421 0.51421 -0.485374 0.485374" mass="0.151298" diaginertia="7.92843e-05 5.39157e-05 5.39e-05"/>
+          <joint name="motor3_joint" pos="0 0 0" axis="-0.0575668 0 -0.998342" range="0 3.1416"/>
+          <geom class="visual" mesh="motor3_link"/>
+          <geom class="collision" mesh="motor3_link"/>
+        </body>
+        <site name="motor3_site" pos="0.00115134 -0.2005 0.061" size="0.01" rgba="1 0 0 1"/>
+        <body name="motor7_link" pos="-0.00115134 -0.2005 -0.0199668">
+          <inertial pos="-0.00109849 0 -0.0190503" quat="0.51421 0.51421 -0.485374 0.485374" mass="0.151298" diaginertia="7.92843e-05 5.39157e-05 5.39e-05"/>
+          <joint name="motor7_joint" pos="0 0 0" axis="0.0575668 0 0.998342" range="0 3.1416"/>
+          <geom class="visual" mesh="motor7_link"/>
+          <geom class="collision" mesh="motor7_link"/>
+        </body>
+        <site name="motor7_site" pos="-0.00115134 -0.2005 -0.061" size="0.01" rgba="1 0 0 1"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <!-- Joint actuators for motor rotation -->
+    <motor name="motor0" joint="motor0_joint"/>
+    <motor name="motor1" joint="motor1_joint"/>
+    <motor name="motor2" joint="motor2_joint"/>
+    <motor name="motor3" joint="motor3_joint"/>
+    <motor name="motor4" joint="motor4_joint"/>
+    <motor name="motor5" joint="motor5_joint"/>
+    <motor name="motor6" joint="motor6_joint"/>
+    <motor name="motor7" joint="motor7_joint"/>
+    
+    <!-- Arm servo actuators -->
+    <position name="left_servo"  joint="left_arm_joint"   kp="8" kv="0.1"/>
+    <position name="right_servo" joint="right_arm_joint"  kp="8" kv="0.1"/>
+
+    <!-- Propeller thrust actuators - Coaxial counter-rotating configuration
+         Each arm has upper (CW/CCW) and lower (opposite) motors
+         Upper and lower motors on same arm have opposite torque to cancel out
+         
+         Configuration:
+         Front arm: motor0(上,CW) + motor4(下,CCW)
+         Rear arm:  motor2(上,CW) + motor6(下,CCW)
+         Left arm:  motor1(上,CCW) + motor5(下,CW)
+         Right arm: motor3(上,CCW) + motor7(下,CW)
+    -->
+    <motor class="haique" ctrlrange="0 1" gear="0 0 17.75 0 0 -1.0" site="motor0_site" name="prop_motor0"/><!-- Front上,CW -->
+    <motor class="haique" ctrlrange="0 1" gear="0 0 17.75 0 0  1.0" site="motor1_site" name="prop_motor1"/><!-- Left上,CCW -->
+    <motor class="haique" ctrlrange="0 1" gear="0 0 17.75 0 0 -1.0" site="motor2_site" name="prop_motor2"/><!-- Rear上,CW -->
+    <motor class="haique" ctrlrange="0 1" gear="0 0 17.75 0 0  1.0" site="motor3_site" name="prop_motor3"/><!-- Right上,CCW -->
+    <motor class="haique" ctrlrange="0 1" gear="0 0 17.75 0 0  1.0" site="motor4_site" name="prop_motor4"/><!-- Front下,CCW -->
+    <motor class="haique" ctrlrange="0 1" gear="0 0 17.75 0 0 -1.0" site="motor5_site" name="prop_motor5"/><!-- Left下,CW -->
+    <motor class="haique" ctrlrange="0 1" gear="0 0 17.75 0 0  1.0" site="motor6_site" name="prop_motor6"/><!-- Rear下,CCW -->
+    <motor class="haique" ctrlrange="0 1" gear="0 0 17.75 0 0 -1.0" site="motor7_site" name="prop_motor7"/><!-- Right下,CW -->
+
+  </actuator>
+
+  <sensor>
+    <!-- IMU sensors at base_link -->
+    <gyro name="gyro" site="imu" noise="0.005" cutoff="30"/>
+    <accelerometer name="accelerometer" site="imu" noise="0.05" cutoff="30"/>
+    <framequat name="orientation" objtype="site" objname="imu"/>
+  </sensor>
+</mujoco>
