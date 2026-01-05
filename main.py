@@ -3,35 +3,41 @@
 import mujoco 
 import mujoco.viewer as viewer 
 import numpy as np
+from os.path import abspath, dirname, join
 from nmpc_controller import NMPC_Controller
 from trajectory_generator import TrajectoryGenerator
 from eso_observer import ESO_Observer
 
+from config_loader import get_mode_config, get_value
+
+
+CONFIG_PATH = join(dirname(abspath(__file__)), "config.yaml")
+CFG = get_mode_config("aerial", path=CONFIG_PATH)
+
 # 新建NMPC控制器
-controller = NMPC_Controller()
+controller = NMPC_Controller(config_path=CONFIG_PATH)
 
 # 新建轨迹生成器
 trajectory_gen = TrajectoryGenerator()
 
-gravity = 9.8066        # 重力加速度 单位m/s^2
-mass = 4.672            # 飞行器质量 单位kg
-Ct = 0.1757            # 电机推力系数 (N/krpm^2)
-Cd = 0.02          # 电机反扭系数 (Nm/krpm^2)
+gravity = float(get_value(CFG, "physical.g", 9.8066))
+mass = float(get_value(CFG, "physical.mass", 4.672))
+Ct = float(get_value(CFG, "physical.Ct", 0.1757))
+Cd = float(get_value(CFG, "physical.Cd", 0.02))
 
-arm_length = 0.605/2.0  # 电机力臂长度 单位m
-max_thrust = 17.75     # 单个电机最大推力 单位N (电机最大转速22krpm)
-max_torque = 0.02  # 单个电机最大扭矩 单位Nm (电机最大转速22krpm)
-left_servo_offset = -0.01
-right_servo_offset = -0.05
+dq = float(get_value(CFG, "physical.dq", 0.605))
+arm_length = dq / 2.0
+max_thrust = float(get_value(CFG, "sim.max_thrust", 17.75))
+max_torque = float(get_value(CFG, "sim.max_torque", 0.02))
 
 last_control_krpm = np.zeros(5)
 last_quat_main = np.array([1.0, 0.0, 0.0, 0.0])
 
-# 仿真周期 100Hz 10ms 0.01s
-dt = 0.01
+# 仿真周期
+dt = float(get_value(CFG, "sim.control_dt", 0.01))
 
 # 新建ESO扰动观测器
-eso = ESO_Observer(dt=dt)
+eso = ESO_Observer(dt=dt, mode="aerial", config_path=CONFIG_PATH)
 
 # 根据电机转速计算电机推力
 def calc_motor_force(krpm):
@@ -40,8 +46,9 @@ def calc_motor_force(krpm):
 
 # 根据电机转速计算电机归一化输入
 def calc_motor_input(krpm):
-    if krpm > 22:
-        krpm = 22
+    max_speed = float(get_value(CFG, "nmpc.max_speed", 22.0))
+    if krpm > max_speed:
+        krpm = max_speed
     elif krpm < 0:
         krpm = 0
     _force = calc_motor_force(krpm)
@@ -101,7 +108,7 @@ def control_callback(m, d):
     goal_position, goal_velocity = trajectory_gen.get_reference_state(d.time)
 
     # NMPC Update（获取扰动补偿可选）
-    k_yaw = 0.8
+    k_yaw = float(get_value(CFG, "model.k_yaw", 0.8))
     # 获取扰动估计（可选用于前馈补偿）
     if eso_enable:
         dist_f, dist_m = eso.update(state_obs, last_control_krpm, quat)
@@ -137,8 +144,8 @@ def control_callback(m, d):
     for i in range(8):
         d.actuator(f'prop_motor{i}').ctrl[0] = calc_motor_input(motor_speeds[i])
 
-    d.actuator('left_servo').ctrl[0] = 0.0 + left_servo_offset   # ~90 degrees
-    d.actuator('right_servo').ctrl[0] = 0.0 + right_servo_offset
+    d.actuator('left_servo').ctrl[0] = 0.0   # ~90 degrees
+    d.actuator('right_servo').ctrl[0] = 0.0
     
     log_count += 1
     if log_count >= 50:

@@ -7,22 +7,60 @@ import numpy as np
 import scipy.linalg
 from os.path import dirname, join, abspath
 import time
+from typing import Optional
+
+from config_loader import get_mode_config, get_value
 
 # np.set_printoptions(precision=3)  # 设置精度
 np.set_printoptions(suppress=True)  # 禁用科学计数法输出
 
 # ACADOS NMPC控制器
 class NMPC_Controller:
-    def __init__(self):
+    def __init__(
+        self,
+        left_servo_offset: Optional[float] = None,
+        right_servo_offset: Optional[float] = None,
+        config_path: str = join(dirname(abspath(__file__)), "config.yaml"),
+    ):
         self.ocp = AcadosOcp()       # OCP 优化问题
+
+        cfg = get_mode_config("underwater", path=config_path)
+
+        # --- physical/model/servo params (single source of truth) ---
+        self.g0 = float(get_value(cfg, "physical.g", 9.8066))
+        self.mq = float(get_value(cfg, "physical.mass", 4.672))
+        inertia = get_value(cfg, "physical.inertia", [0.10170715, 0.10222875, 0.16095642])
+        self.inertia = np.asarray(inertia, dtype=float)
+        self.Ct = float(get_value(cfg, "physical.Ct", 0.0267))
+        self.Cd = float(get_value(cfg, "physical.Cd", 0.00111))
+        self.dq = float(get_value(cfg, "physical.dq", 0.605))
+        self.k_yaw_lr = float(get_value(cfg, "model.k_yaw_lr", 1.5))
+        self.k_yaw_other = float(get_value(cfg, "model.k_yaw_other", 0.3))
+
+        cfg_left_offset = float(get_value(cfg, "servo.left_offset", -0.1))
+        cfg_right_offset = float(get_value(cfg, "servo.right_offset", 0.0))
+        self.left_servo_offset = float(cfg_left_offset if left_servo_offset is None else left_servo_offset)
+        self.right_servo_offset = float(cfg_right_offset if right_servo_offset is None else right_servo_offset)
+
         # self.model = export_model()  # 导出四旋翼物理模型
-        self.model = export_model_underwater()
+        self.model = export_model_underwater(
+            g0=self.g0,
+            mass=self.mq,
+            inertia=tuple(float(x) for x in self.inertia.tolist()),
+            Ct=self.Ct,
+            Cd=self.Cd,
+            dq=self.dq,
+            alpha_offset=self.left_servo_offset,
+            beta_offset=self.right_servo_offset,
+            k_yaw_lr=self.k_yaw_lr,
+            k_yaw_other=self.k_yaw_other,
+        )
         
         # 数据记录
         self.data_log = []
 
-        self.Tf = 0.5                       # 预测时间长度(s) - 降低以提高求解速度
-        self.N = 30                         # 预测步数(节点数量) - 降低以提高稳定性
+        self.Tf = float(get_value(cfg, "nmpc.Tf", 0.5))          # 预测时间长度(s)
+        self.N = int(get_value(cfg, "nmpc.N", 30))              # 预测步数(节点数量)
         self.nx = self.model.x.size()[0]    # 状态维度 13维度
         self.nu = self.model.u.size()[0]    # 控制输入维度 10维度（8电机+2舵机）
         self.ny = self.nx + self.nu         # 评估维度
@@ -32,46 +70,108 @@ class NMPC_Controller:
         self.nlp_dims     = self.ocp.dims
         self.nlp_dims.N   = self.N
 
-        # parameters
-        self.g0  = 9.8066    # [m.s^2] accerelation of gravity
-        self.mq  = 4.672     # [kg] total mass (with one marker)
-        self.Ct  = 0.1757   # [N/krpm^2] Thrust coef
-
         # bounds
-        self.hov_w = 2 * np.sqrt((self.mq*self.g0)/(4*self.Ct))  # 悬停时单个电机推力 1 3 5 7
+        # 悬停（仅 1/3/5/7 四个竖直推进器承担重力）：mq*g ≈ 4*Ct*hov_w^2
+        self.hov_w = np.sqrt((self.mq * self.g0) / (4 * self.Ct))
         print(f"hovor speed: {self.hov_w} krpm")
-        # hovor speed: 15.777730167256925 krpm
+        # hovor speed: ~20.7 krpm (with Ct=0.0267)
 
-        self.max_speed = 30.0  # 电机最高转速(krpm) - 增加以提供更大控制余量
+        self.max_speed = float(get_value(cfg, "nmpc.max_speed", 30.0))  # 电机最高转速(krpm)
+
+        # 舵机几何偏好：尽量与机体 x 轴平行（物理角 alpha/beta ≈ pi/2），允许小幅差动来生成 z 分力并平衡 roll。
+        # Mujoco 中实际舵机角 = 控制指令 + offset；因此让“中心值”落在指令空间：cmd_center = pi/2 - offset。
+        self.servo_center_alpha = (np.pi / 2) - self.left_servo_offset
+        self.servo_center_beta = (np.pi / 2) - self.right_servo_offset
+        # 允许偏转范围：增加余量以提升抗扰（代价会把舵机拉回中心，只有需要时才会偏转）
+        self.servo_max_dev = np.deg2rad(float(get_value(cfg, "servo.max_dev_deg", 45.0)))
+
+        # 扰动参数预处理：ESO 输出可能存在尖峰/尺度失真，直接送入 NMPC 会导致控制饱和与不收敛。
+        # 这里做最小化处理：逐轴限幅 + 一阶低通（不改变接口，不依赖 ESO）。
+        self.dist_force_clip = np.asarray(get_value(cfg, "nmpc.dist_force_clip", [60.0, 60.0, 60.0]), dtype=float)    # N
+        self.dist_torque_clip = np.asarray(get_value(cfg, "nmpc.dist_torque_clip", [12.0, 12.0, 12.0]), dtype=float)  # Nm
+        self.dist_lpf_alpha = float(get_value(cfg, "nmpc.dist_lpf_alpha", 0.20))  # 0~1，越大越“跟随”新估计
+        self._disturbance_filt = np.zeros(6)
 
         # set weighting matrices 状态权重矩阵
-        Q = np.eye(self.nx)
-        Q[0,0] = 60.0        # x - 适度降低，优先保持姿态稳定
-        Q[1,1] = 60.0        # y
-        Q[2,2] = 150.0       # z - 增加以减小稳态误差
-        # 姿态权重 (约束飞行器保持水平姿态) - 极其重要！
-        Q[3,3] = 0.0         # qw (标量部分，通常不直接约束)
-        Q[4,4] = 60.0        # qx (roll) - 增加以提高抗干扰性
-        Q[5,5] = 100.0        # qy (pitch) - 增加以提高抗干扰性
-        Q[6,6] = 50.0        # qz (yaw) - 增加以减小yaw误差
-        Q[7,7] = 10.0        # vbx - 适度约束速度
-        Q[8,8] = 10.0        # vby
-        Q[9,9] = 30.0        # vbz - 降低以允许更大速度响应
-        Q[10,10] = 30.0      # wx - 增加以提高抗干扰性
-        Q[11,11] = 40.0      # wy - 增加以提高抗干扰性
-        Q[12,12] = 100.0     # wz - 大幅增加以改善yaw控制
+        q_diag = get_value(cfg, "nmpc.Q_diag", None)
+        if isinstance(q_diag, list) and len(q_diag) == self.nx:
+            Q = np.diag(np.asarray(q_diag, dtype=float))
+        else:
+            Q = np.eye(self.nx)
+            # 抗外部干扰：提高位置与速度阻尼权重，避免在持续扰动下“越飘越远”。
+            Q[0,0] = 300.0       # x
+            Q[1,1] = 300.0       # y
+            Q[2,2] = 320.0       # z
+            # 姿态权重 (约束飞行器保持水平姿态) - 极其重要！
+            Q[3,3] = 0.0         # qw (标量部分，通常不直接约束)
+            Q[4,4] = 120         # qx (roll)
+            Q[5,5] = 360         # qy (pitch)
+            Q[6,6] = 50.0        # qz (yaw)
+            Q[7,7] = 120.0       # vx
+            Q[8,8] = 120.0       # vy
+            Q[9,9] = 90.0        # vz
+            Q[10,10] = 120.0     # wx
+            Q[11,11] = 120.0     # wy
+            Q[12,12] = 80.0      # wz
 
-        R = np.eye(self.nu)   # 控制输入权重矩阵
-        R[0,0] = 0.5         # w1
-        R[1,1] = 0.5         # w2
-        R[2,2] = 0.5         # w3
-        R[3,3] = 0.5         # w4
-        R[4,4] = 0.5         # w5
-        R[5,5] = 0.5         # w6
-        R[6,6] = 0.5         # w7
-        R[7,7] = 0.5         # w8
-        R[8,8] = 0.1         # alpha
-        R[9,9] = 0.1         # beta
+        r_diag = get_value(cfg, "nmpc.R_diag", None)
+        if isinstance(r_diag, list) and len(r_diag) == self.nu:
+            R = np.diag(np.asarray(r_diag, dtype=float))
+        else:
+            R = np.eye(self.nu)   # 控制输入权重矩阵
+            # 持续扰动下需要更“敢用力”，适当降低电机代价。
+            for i in range(8):
+                R[i, i] = 0.10
+
+        # 额外约束（软约束，通过代价实现）：减少偶数电机（前/后竖直推进器）之间的极端不均衡。
+        # 目的：避免出现“两个电机拉满、另外两个接近 0”这种不物理/易发散的分配。
+        # 说明：这是软惩罚，不会禁止产生 pitch 力矩所需的前后差分，只是让优化器更偏好均衡解。
+        def _add_diff_penalty(i, j, k):
+            # 在 R 上加入 k*(u_i - u_j)^2
+            R[i, i] += k
+            R[j, j] += k
+            R[i, j] -= k
+            R[j, i] -= k
+
+        def _add_linear_combo_penalty(indices, coeffs, k):
+            # 在 R 上加入 k*(sum c_i*u_i)^2 = k * u^T (a a^T) u
+            a = np.zeros(self.nu)
+            for idx, c in zip(indices, coeffs):
+                a[int(idx)] = float(c)
+            R[:, :] = R + k * np.outer(a, a)
+
+        # 四个竖直推进器在控制向量中的索引（对应 motor0,motor2,motor4,motor6）
+        idx_front_up = 0
+        idx_rear_up = 2
+        idx_front_down = 4
+        idx_rear_down = 6
+
+        # 1) 同轴一前一后两桨尽量同速（防止只用其中一个）
+        k_coax = float(get_value(cfg, "nmpc.penalties.k_coax", 0.03))
+        _add_diff_penalty(idx_front_up, idx_front_down, k_coax)
+        _add_diff_penalty(idx_rear_up, idx_rear_down, k_coax)
+
+        # 2) 前后总推力尽量均衡： (front_up + front_down) - (rear_up + rear_down) ≈ 0
+        #    这会减少“前面两桨打满、后面两桨几乎不转”的情况，但仍允许产生必要的前后差分。
+        k_front_rear = float(get_value(cfg, "nmpc.penalties.k_front_rear", 0.02))
+        _add_linear_combo_penalty(
+            [idx_front_up, idx_front_down, idx_rear_up, idx_rear_down],
+            [1.0, 1.0, -1.0, -1.0],
+            k_front_rear,
+        )
+
+        # 舵机权重：希望机体水平/roll≈0 时舵机尽量回到各自中心（物理角≈pi/2）。
+        # 之前“均值强、差动弱”的形式会让 (alpha-beta) 差动非常便宜，导致即使 roll≈0 也可能长期一高一低。
+        # 改为分别惩罚 (alpha-center)^2 与 (beta-center)^2：
+        # - 平时会更愿意把两舵机都压回中心
+        # - 需要 roll 力矩时仍可差动，但代价会随差动增大而增大（更符合你的预期）
+        # 如果 R_diag 已提供，则舵机权重由配置决定；否则保持历史默认。
+        if not (isinstance(r_diag, list) and len(r_diag) == self.nu):
+            k_servo = 100.0
+            R[8, 8] = k_servo
+            R[9, 9] = k_servo
+            R[8, 9] = 0.0
+            R[9, 8] = 0.0
 
         self.ocp.cost.W = scipy.linalg.block_diag(Q, R)
 
@@ -93,18 +193,18 @@ class NMPC_Controller:
 
         Vu = np.zeros((self.ny, self.nu))
         Vu[13,0] = 1.0
-        Vu[14,1] = 0.0
+        Vu[14,1] = 1.0
         Vu[15,2] = 1.0
-        Vu[16,3] = 0.0
+        Vu[16,3] = 1.0
         Vu[17,4] = 1.0
-        Vu[18,5] = 0.0
+        Vu[18,5] = 1.0
         Vu[19,6] = 1.0
-        Vu[20,7] = 0.0
-        Vu[21,8] = 0.0
-        Vu[22,9] = 0.0
+        Vu[20,7] = 1.0
+        Vu[21,8] = 1.0
+        Vu[22,9] = 1.0
         self.ocp.cost.Vu = Vu
 
-        self.ocp.cost.W_e = 50.0 * Q
+        self.ocp.cost.W_e = float(get_value(cfg, "nmpc.W_e_scale", 50.0)) * Q
 
         Vx_e = np.zeros((self.ny_e, self.nx))
         Vx_e[0,0] = 1.0
@@ -123,17 +223,29 @@ class NMPC_Controller:
         self.ocp.cost.Vx_e = Vx_e
 
         # 过程参考向量(状态+输入)
-        # 8 个桨统一悬停推力，舵机默认 90°（让 2/4/6/8 也有余度）
+        # 重要：在存在浮力/水流等模型外稳态效应时，给电机一个固定的“悬停转速参考”会形成代价偏置，
+        # 使优化器倾向保持某个非零推力而非精确把位置误差压回去，表现为缓慢漂移/高度爬升。
+        # 因此这里对电机参考统一置 0，仅把舵机参考置于几何中心（更符合“roll≈0 时舵机回中”的设计意图）。
         self.ocp.cost.yref   = np.array([
             0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-            self.hov_w, self.hov_w, self.hov_w, self.hov_w, self.hov_w, self.hov_w, self.hov_w, self.hov_w, np.pi/2, np.pi/2
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, self.servo_center_alpha, self.servo_center_beta
         ])
         # 终端参考向量(状态)
         self.ocp.cost.yref_e = np.array([0.0, 0.0, 0.0, 1.0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
 
         # 构建约束
-        self.ocp.constraints.lbu = np.array([0.0, -self.max_speed, 0.0, -self.max_speed, 0.0, -self.max_speed, 0.0, -self.max_speed, 0.0, 0.0])
-        self.ocp.constraints.ubu = np.array([+self.max_speed, +self.max_speed, +self.max_speed, +self.max_speed, +self.max_speed, +self.max_speed, +self.max_speed, +self.max_speed, np.pi, np.pi])  # 避免过度不平衡
+        # 物理约束：电机转速非负；舵机以 pi/2 为中心小范围偏转（偏转差动用来平衡 roll）
+        self.ocp.constraints.lbu = np.array([
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            self.servo_center_alpha - self.servo_max_dev,
+            self.servo_center_beta - self.servo_max_dev,
+        ])
+        self.ocp.constraints.ubu = np.array([
+            self.max_speed, self.max_speed, self.max_speed, self.max_speed,
+            self.max_speed, self.max_speed, self.max_speed, self.max_speed,
+            self.servo_center_alpha + self.servo_max_dev,
+            self.servo_center_beta + self.servo_max_dev,
+        ])
         self.ocp.constraints.x0  = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])  # 初始状态
         self.ocp.constraints.idxbu = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])  # 所有电机转速参与评估
 
@@ -274,7 +386,7 @@ class NMPC_Controller:
         goal_state = self.referen_state_transition(current_state, goal_state)
 
         y_ref = np.concatenate((goal_state, np.array([
-            self.hov_w, self.hov_w, self.hov_w, self.hov_w, self.hov_w, self.hov_w, self.hov_w, self.hov_w, np.pi/2, np.pi/2
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, self.servo_center_alpha, self.servo_center_beta
         ])))
         # Set Goal State
         for i in range(self.N):
@@ -285,10 +397,15 @@ class NMPC_Controller:
         # 设置扰动参数 (如果提供)
         if disturbance is not None:
             # disturbance = [fx, fy, fz, mx, my, mz]
-            p = disturbance
+            d = np.asarray(disturbance, dtype=float).reshape(6,)
+            d[0:3] = np.clip(d[0:3], -self.dist_force_clip, self.dist_force_clip)
+            d[3:6] = np.clip(d[3:6], -self.dist_torque_clip, self.dist_torque_clip)
+            self._disturbance_filt = (1.0 - self.dist_lpf_alpha) * self._disturbance_filt + self.dist_lpf_alpha * d
+            p = self._disturbance_filt
         else:
-            # 默认零扰动
-            p = np.zeros(6)
+            # 默认零扰动（并清空滤波状态，避免上一次 ESO 影响残留）
+            self._disturbance_filt[:] = 0.0
+            p = self._disturbance_filt
         
         # 为所有预测步长设置扰动参数
         for i in range(self.N):
@@ -308,10 +425,32 @@ class NMPC_Controller:
                 print("   → QP求解器失败")
             elif status == 4:
                 print("   → 求解器达到最大迭代次数（未收敛）")
-            # 返回悬停控制量作为安全回退（8 桨悬停，舵机居中）
+            # 回退控制：
+            # - 舵机保持几何中心（物理角约 pi/2）
+            # - 仅 1/3/5/7 四个竖直推进器承担重力
+            # - 为避免“摔倒后卡在地面、只给悬停推力起不来”，对 z 做一个小的 PD，给出略大于悬停的推力
             _end = time.perf_counter()
             _dt = _end - _start
-            return _dt, np.array([self.hov_w, 0.0, self.hov_w, 0.0, self.hov_w, 0.0, self.hov_w, 0.0, np.pi/2, np.pi/2])
+
+            z = float(current_state[2])
+            vz = float(current_state[9])
+            z_ref = float(goal_state[2])
+            vz_ref = float(goal_state[9])
+
+            # 经验值：只在求解失败时启用，保守一点即可
+            kp_z = 2.5
+            kd_z = 1.2
+            a_z_cmd = kp_z * (z_ref - z) + kd_z * (vz_ref - vz)
+            a_z_cmd = float(np.clip(a_z_cmd, -2.0, 6.0))
+            thrust_total = self.mq * (self.g0 + a_z_cmd)
+            thrust_per = float(np.clip(thrust_total / 4.0, 0.0, 4.0 * 24.0))
+            w_fb = float(np.sqrt(max(thrust_per, 0.0) / self.Ct))
+            w_fb = float(np.clip(w_fb, 0.0, self.max_speed))
+
+            return _dt, np.array([
+                w_fb, 0.0, w_fb, 0.0, w_fb, 0.0, w_fb, 0.0,
+                self.servo_center_alpha, self.servo_center_beta
+            ])
         
         # Get Solution (仅在成功时获取)
         w_opt_acados = np.ndarray((self.N, self.nu))  # 控制输入
@@ -330,7 +469,7 @@ class NMPC_Controller:
 
     # NMPC位置控制
     # goal_pos: 目标三维位置[x y z]
-    def nmpc_position_control(self, current_state, goal_pos, disturbance=None):
+    def nmpc_position_control(self, current_state, goal_pos, disturbance=None, goal_vel=None):
         """
         位置控制
         
@@ -344,7 +483,19 @@ class NMPC_Controller:
             _dt: 求解时间
             control: 控制输出 [w1..w8, alpha, beta]
         """
-        goal_state = np.array([goal_pos[0], goal_pos[1], goal_pos[2], 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        if goal_vel is None:
+            goal_vel = np.zeros(3)
+        goal_vel = np.asarray(goal_vel, dtype=float).reshape(3,)
+
+        # goal_state: [x,y,z,qw,qx,qy,qz,vx,vy,vz,wx,wy,wz]
+        # 重要：对圆轨迹/方轨迹这类“动态参考”，给 vx/vy/vz 前馈能避免 referen_state_transition()
+        # 把它误判成“静态追点”而在某些相位抑制平移（表现为只跑一小段就停）。
+        goal_state = np.array([
+            goal_pos[0], goal_pos[1], goal_pos[2],
+            1.0, 0.0, 0.0, 0.0,
+            goal_vel[0], goal_vel[1], goal_vel[2],
+            0.0, 0.0, 0.0,
+        ])
         
         # 将扰动字典转换为参数数组 [fx, fy, fz, mx, my, mz]
         if disturbance is not None:

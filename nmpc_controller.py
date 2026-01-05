@@ -6,22 +6,46 @@ import numpy as np
 import scipy.linalg
 from os.path import dirname, join, abspath
 import time
+from typing import Optional
+
+from config_loader import get_mode_config, get_value
 
 # np.set_printoptions(precision=3)  # 设置精度
 np.set_printoptions(suppress=True)  # 禁用科学计数法输出
 
 # ACADOS NMPC控制器
 class NMPC_Controller:
-    def __init__(self):
+    def __init__(self, config_path: str = join(dirname(abspath(__file__)), "config.yaml")):
         self.ocp = AcadosOcp()       # OCP 优化问题
+
+        cfg = get_mode_config("aerial", path=config_path)
+
+        # physical/model params
+        self.g0 = float(get_value(cfg, "physical.g", 9.8066))
+        self.mq = float(get_value(cfg, "physical.mass", 4.672))
+        inertia = get_value(cfg, "physical.inertia", [0.10170715, 0.10222875, 0.16095642])
+        self.inertia = np.asarray(inertia, dtype=float)
+        self.Ct = float(get_value(cfg, "physical.Ct", 0.1757))
+        self.Cd = float(get_value(cfg, "physical.Cd", 0.02))
+        self.dq = float(get_value(cfg, "physical.dq", 0.605))
+        self.k_yaw = float(get_value(cfg, "model.k_yaw", 0.8))
+
         # self.model = export_model()  # 导出四旋翼物理模型
-        self.model = export_model()
+        self.model = export_model(
+            g0=self.g0,
+            mass=self.mq,
+            inertia=tuple(float(x) for x in self.inertia.tolist()),
+            Ct=self.Ct,
+            Cd=self.Cd,
+            dq=self.dq,
+            k_yaw=self.k_yaw,
+        )
         
         # 数据记录
         self.data_log = []
 
-        self.Tf = 0.6                       # 预测时间长度(s) - 稍加长以提升前瞻性、减小振荡
-        self.N = 30                         # 预测步数(节点数量) - 降低以提高稳定性
+        self.Tf = float(get_value(cfg, "nmpc.Tf", 0.6))          # 预测时间长度(s)
+        self.N = int(get_value(cfg, "nmpc.N", 30))              # 预测步数(节点数量)
         self.nx = self.model.x.size()[0]    # 状态维度 13维度
         self.nu = self.model.u.size()[0]    # 控制输入维度 5维度 (w1,w2,w3,w4,yaw_bias)
         self.ny = self.nx + self.nu         # 评估维度
@@ -30,11 +54,6 @@ class NMPC_Controller:
         # set ocp_nlp_dimensions
         self.nlp_dims     = self.ocp.dims
         self.nlp_dims.N   = self.N
-
-        # parameters
-        self.g0  = 9.8066    # [m.s^2] accerelation of gravity
-        self.mq  = 4.672     # [kg] total mass (with one marker)
-        self.Ct  = 0.1757   # [N/krpm^2] Thrust coef
 
         # bounds
         # 注意：本模型里 NMPC 的 4 个“基准电机转速”会通过 yaw_bias 混控生成 8 个实际电机转速参与推力。
@@ -45,34 +64,38 @@ class NMPC_Controller:
 
         # MuJoCo 执行端 calc_motor_input() 会将电机转速硬限幅到 22krpm。
         # 约束需要与执行端一致，否则 NMPC 会规划不可实现的推力，导致 z 通道振荡/发散。
-        self.max_speed = 22.0
+        self.max_speed = float(get_value(cfg, "nmpc.max_speed", 22.0))
 
         # set weighting matrices 状态权重矩阵
-        Q = np.eye(self.nx)
-        Q[0,0] = 180.0       # x - 适度降低，优先保持姿态稳定
-        Q[1,1] = 180.0       # y
-        Q[2,2] = 260         # z - 再提高：继续压稳态误差
-        # 姿态权重 (约束飞行器保持水平姿态) - 极其重要！
-        Q[3,3] = 10.0        # qw - 给一点权重避免姿态/符号漂移
-        Q[4,4] = 60.0        # qx (roll) - 增加以提高抗干扰性
-        Q[5,5] = 80.0        # qy (pitch) - 增加以提高抗干扰性
-        Q[6,6] = 80.0        # qz (yaw) - 提高：抑制偏航漂移/发散
-        # XY 不稳定/来回摆动时，最有效的是加“横向速度阻尼”
-        Q[7,7] = 80.0        # vbx
-        Q[8,8] = 80.0        # vby
-        Q[9,9] = 260.0       # vbz - 再加阻尼：优先抑制 z 超调/回弹
-        # 同时增加滚转/俯仰角速度阻尼，避免“摆杆式”横向振荡
-        Q[10,10] = 120.0     # wx
-        Q[11,11] = 120.0     # wy
-        Q[12,12] = 80.0      # wz - 提高：给偏航角速度更多阻尼，避免发散
+        q_diag = get_value(cfg, "nmpc.Q_diag", None)
+        if isinstance(q_diag, list) and len(q_diag) == self.nx:
+            Q = np.diag(np.asarray(q_diag, dtype=float))
+        else:
+            Q = np.eye(self.nx)
+            Q[0,0] = 180.0       # x
+            Q[1,1] = 180.0       # y
+            Q[2,2] = 260.0       # z
+            Q[3,3] = 10.0        # qw
+            Q[4,4] = 60.0        # qx
+            Q[5,5] = 80.0        # qy
+            Q[6,6] = 80.0        # qz
+            Q[7,7] = 80.0        # vx
+            Q[8,8] = 80.0        # vy
+            Q[9,9] = 260.0       # vz
+            Q[10,10] = 120.0     # wx
+            Q[11,11] = 120.0     # wy
+            Q[12,12] = 80.0      # wz
 
-        R = np.eye(self.nu)   # 控制输入权重矩阵
-        # 在“稳”的基础上略微加快响应：适度减小电机输入惩罚
-        R[0,0] = 0.95
-        R[1,1] = 0.95
-        R[2,2] = 0.95
-        R[3,3] = 0.95
-        R[4,4] = 0.40
+        r_diag = get_value(cfg, "nmpc.R_diag", None)
+        if isinstance(r_diag, list) and len(r_diag) == self.nu:
+            R = np.diag(np.asarray(r_diag, dtype=float))
+        else:
+            R = np.eye(self.nu)   # 控制输入权重矩阵
+            R[0,0] = 0.95
+            R[1,1] = 0.95
+            R[2,2] = 0.95
+            R[3,3] = 0.95
+            R[4,4] = 0.40
 
         self.ocp.cost.W = scipy.linalg.block_diag(Q, R)
 
@@ -100,7 +123,7 @@ class NMPC_Controller:
         Vu[17,4] = 1.0
         self.ocp.cost.Vu = Vu
 
-        self.ocp.cost.W_e = 10.0 * Q
+        self.ocp.cost.W_e = float(get_value(cfg, "nmpc.W_e_scale", 10.0)) * Q
 
         Vx_e = np.zeros((self.ny_e, self.nx))
         Vx_e[0,0] = 1.0

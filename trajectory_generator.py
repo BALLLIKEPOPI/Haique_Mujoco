@@ -4,9 +4,13 @@ import numpy as np
 
 class TrajectoryGenerator:
     def __init__(self):
-        self.mode = 'hover'  # 'hover', 'circle', 'square', 'climb'
+        self.mode = 'hover'  # 'hover', 'circle', 'square', 'climb', 'forward'
         self.start_time = 0.0
         self.current_time = 0.0
+
+        # 非悬停轨迹的“预悬停”时间：先在 hover_position 稳住，再开始平滑过渡+跟踪轨迹
+        self.pre_hover_duration = 2.0  # s
+        self.motion_start_time = 0.0
         
         # 悬停参数
         self.hover_position = np.array([0.0, 0.0, 1.0])
@@ -25,6 +29,10 @@ class TrajectoryGenerator:
         self.climb_start_height = 0.0  # 起始高度（从地面开始）
         self.climb_target_height = 2.5  # 目标高度
         self.climb_speed = 0.3  # 爬升速度 (m/s)
+
+        # 匀速前进参数（沿 +X 方向）
+        self.forward_speed = 0.5  # m/s
+        self.forward_start_pos = self.hover_position.copy()
         
         # 平滑过渡参数
         self.transition_duration = 2.0  # 过渡时间（秒）
@@ -34,11 +42,23 @@ class TrajectoryGenerator:
     
     def set_mode(self, mode):
         """切换轨迹模式"""
-        if mode in ['hover', 'circle', 'square', 'climb']:
+        if mode in ['hover', 'circle', 'square', 'climb', 'forward']:
             self.mode = mode
             self.start_time = self.current_time
-            # 记录过渡起始位置（用于平滑过渡）
-            self.transition_start_pos = self.last_position.copy()
+
+            if mode == 'forward':
+                # forward 轨迹从悬停点出发
+                self.forward_start_pos = self.hover_position.copy()
+
+            # 两阶段：先悬停，再开始过渡/运动
+            if mode == 'hover':
+                self.motion_start_time = self.current_time
+                # 悬停模式：从当前位置（上一参考）平滑过渡到 hover_position
+                self.transition_start_pos = self.last_position.copy()
+            else:
+                self.motion_start_time = self.current_time + self.pre_hover_duration
+                # 非悬停轨迹：预悬停期间参考固定在 hover_position；真正开始运动时从 hover_position 过渡
+                self.transition_start_pos = self.hover_position.copy()
             
             print(f"✓ 切换轨迹模式: {mode}")
             if mode == 'hover':
@@ -55,12 +75,21 @@ class TrajectoryGenerator:
                 print(f"  连续爬升: {self.climb_start_height}m → {self.climb_target_height}m")
                 print(f"  爬升速度: {self.climb_speed} m/s")
                 print(f"  预计时间: {climb_time:.1f} 秒")
+            elif mode == 'forward':
+                print(f"  匀速前进: speed={self.forward_speed} m/s (沿 +X)")
+                print(f"  → 将平滑过渡到起点 (耗时{self.transition_duration}s)")
         else:
             print(f"✗ 未知轨迹模式: {mode}")
     
     def get_reference(self, time):
         """根据当前时间和模式生成参考位置"""
         self.current_time = time
+
+        # 预悬停：非 hover 模式先保持悬停参考
+        if (self.mode != 'hover') and (self.current_time < self.motion_start_time):
+            final_pos = self.hover_position.copy()
+            self.last_position = final_pos.copy()
+            return final_pos
         
         if self.mode == 'hover':
             target_pos = self._hover_trajectory()
@@ -70,6 +99,8 @@ class TrajectoryGenerator:
             target_pos = self._square_trajectory()
         elif self.mode == 'climb':
             target_pos = self._climb_trajectory()
+        elif self.mode == 'forward':
+            target_pos = self._forward_trajectory()
         else:
             target_pos = self.hover_position.copy()
         
@@ -88,6 +119,13 @@ class TrajectoryGenerator:
         """
         self.current_time = time
 
+        # 预悬停：非 hover 模式先保持悬停参考（位置+速度）
+        if (self.mode != 'hover') and (self.current_time < self.motion_start_time):
+            final_pos = self.hover_position.copy()
+            final_vel = np.zeros(3)
+            self.last_position = final_pos.copy()
+            return final_pos, final_vel
+
         if self.mode == 'hover':
             target_pos = self._hover_trajectory()
             target_vel = np.zeros(3)
@@ -97,13 +135,15 @@ class TrajectoryGenerator:
             target_pos, target_vel = self._square_trajectory_state()
         elif self.mode == 'climb':
             target_pos, target_vel = self._climb_trajectory_state()
+        elif self.mode == 'forward':
+            target_pos, target_vel = self._forward_trajectory_state()
         else:
             target_pos = self.hover_position.copy()
             target_vel = np.zeros(3)
 
         # 过渡期位置用插值；速度前馈在过渡期置零，避免目标速度跳变
         final_pos = self._apply_transition(target_pos)
-        if (self.current_time - self.start_time) < self.transition_duration:
+        if self._elapsed_motion_time() < self.transition_duration:
             final_vel = np.zeros(3)
         else:
             final_vel = target_vel
@@ -115,8 +155,8 @@ class TrajectoryGenerator:
         """应用平滑过渡从当前位置到目标轨迹"""
         if self.transition_start_pos is None:
             return target_pos
-        
-        t = self.current_time - self.start_time
+
+        t = self._elapsed_motion_time()
         
         # 在过渡时间内，进行插值
         if t < self.transition_duration:
@@ -134,10 +174,14 @@ class TrajectoryGenerator:
     def _hover_trajectory(self):
         """悬停轨迹"""
         return self.hover_position.copy()
+
+    def _elapsed_motion_time(self):
+        """返回进入“运动阶段”后的时间（扣除预悬停）。"""
+        return max(0.0, float(self.current_time - self.motion_start_time))
     
     def _circle_trajectory(self):
         """圆形轨迹"""
-        t = self.current_time - self.start_time
+        t = self._elapsed_motion_time()
         
         # 在过渡期间，返回轨迹起点（避免追逐移动目标）
         if t < self.transition_duration:
@@ -153,9 +197,33 @@ class TrajectoryGenerator:
         
         return np.array([x, y, z])
 
+    def _forward_trajectory(self):
+        """匀速前进轨迹（沿 +X）"""
+        t = self._elapsed_motion_time()
+
+        # 过渡期间固定在起点，避免追逐移动目标
+        if t < self.transition_duration:
+            return self.forward_start_pos.copy()
+
+        t_actual = t - self.transition_duration
+        x = self.forward_start_pos[0] + self.forward_speed * t_actual
+        y = self.forward_start_pos[1]
+        z = self.forward_start_pos[2]
+        return np.array([x, y, z])
+
+    def _forward_trajectory_state(self):
+        """匀速前进轨迹（位置+速度）"""
+        t = self._elapsed_motion_time()
+        pos = self._forward_trajectory()
+        if t < self.transition_duration:
+            vel = np.zeros(3)
+        else:
+            vel = np.array([self.forward_speed, 0.0, 0.0])
+        return pos, vel
+
     def _circle_trajectory_state(self):
         """圆形轨迹（位置+解析速度）"""
-        t = self.current_time - self.start_time
+        t = self._elapsed_motion_time()
 
         if t < self.transition_duration:
             theta = 0.0
@@ -178,7 +246,7 @@ class TrajectoryGenerator:
     def _square_trajectory_state(self):
         """方形轨迹（位置+近似速度）。"""
         # 为了保持简单：过渡期速度置零；过渡完成后按分段常速度给前馈。
-        t = self.current_time - self.start_time
+        t = self._elapsed_motion_time()
         pos = self._square_trajectory()
         if t < self.transition_duration:
             return pos, np.zeros(3)
@@ -204,7 +272,7 @@ class TrajectoryGenerator:
 
     def _climb_trajectory_state(self):
         """爬升轨迹（位置+速度）"""
-        t = self.current_time - self.start_time
+        t = self._elapsed_motion_time()
         pos = self._climb_trajectory()
 
         height_diff = self.climb_target_height - self.climb_start_height
@@ -217,7 +285,7 @@ class TrajectoryGenerator:
     
     def _square_trajectory(self):
         """方形轨迹"""
-        t = self.current_time - self.start_time
+        t = self._elapsed_motion_time()
         
         half_size = self.square_size / 2.0
         cx, cy, cz = self.square_center
@@ -256,7 +324,7 @@ class TrajectoryGenerator:
     
     def _climb_trajectory(self):
         """连续线性爬升轨迹"""
-        t = self.current_time - self.start_time
+        t = self._elapsed_motion_time()
         
         # 计算总爬升时间
         height_diff = self.climb_target_height - self.climb_start_height
@@ -316,4 +384,10 @@ class TrajectoryGenerator:
         print(f"✓ 连续爬升参数: {self.climb_start_height}m → {self.climb_target_height}m")
         print(f"  爬升速度: {self.climb_speed} m/s")
         print(f"  预计时间: {climb_time:.1f} 秒")
+
+    def set_forward_params(self, speed=None):
+        """设置匀速前进参数"""
+        if speed is not None:
+            self.forward_speed = float(speed)
+        print(f"✓ 匀速前进参数: speed={self.forward_speed} m/s (沿 +X)")
 

@@ -2,17 +2,22 @@
 from acados_template import AcadosModel
 from casadi import SX, vertcat
 
-def export_model_underwater():
+def export_model_underwater(
+    *,
+    g0: float = 9.8066,
+    mass: float = 4.672,
+    inertia=(0.10170715, 0.10222875, 0.16095642),
+    Ct: float = 0.0267,
+    Cd: float = 0.00111,
+    dq: float = 0.605,
+    alpha_offset: float = -0.1,
+    beta_offset: float = 0.0,
+    k_yaw_lr: float = 1.5,
+    k_yaw_other: float = 0.3,
+):
     model_name = 'haique'
     # parameters
-    g0  = 9.8066     # [m.s^2] accerelation of gravity
-    mass  = 4.672      # [kg] total mass (with one marker)
-    Ixx = 0.10170715   # [kg.m^2] Inertia moment around x-axis
-    Iyy = 0.10222875   # [kg.m^2] Inertia moment around y-axis
-    Izz = 0.16095642   # [kg.m^2] Inertia moment around z-axis
-    Ct  = 0.1757       # [N/krpm^2] Thrust coef (推力系数) - 修正：之前与Cd值写反了
-    Cd  = 0.02         # [Nm/krpm^2] Drag coef (反扭系数) - 修正为与haique.xml一致
-    dq  = 0.605      # [m] distance between motors' center
+    Ixx, Iyy, Izz = inertia
     l   = dq/2       # [m] distance between motors' center and the axis of rotation
 
     # 世界坐标系位置
@@ -119,9 +124,12 @@ def export_model_underwater():
     R21 = 2*(q2*q3 + q0*q1)
     R22 = 1 - 2*(q1*q1 + q2*q2)
 
-    fx_b = f2 * SX.sin(alpha) + f4 * SX.sin(beta) + f6 * SX.sin(alpha) + f8 * SX.sin(beta)
+    alpha_eff = alpha + alpha_offset
+    beta_eff = beta + beta_offset
+
+    fx_b = f2 * SX.sin(alpha_eff) + f4 * SX.sin(beta_eff) + f6 * SX.sin(alpha_eff) + f8 * SX.sin(beta_eff)
     fy_b = 0
-    fz_b = f1 + f2 * SX.cos(alpha) + f3 + f4 * SX.cos(beta) + f5 + f6 * SX.cos(alpha) + f7 + f8 * SX.cos(beta)
+    fz_b = f1 + f2 * SX.cos(alpha_eff) + f3 + f4 * SX.cos(beta_eff) + f5 + f6 * SX.cos(alpha_eff) + f7 + f8 * SX.cos(beta_eff)
     _thrust_accx_w = (R00*fx_b + R01*fy_b + R02*fz_b) / mass
     _thrust_accy_w = (R10*fx_b + R11*fy_b + R12*fz_b) / mass
     _thrust_accz_w = (R20*fx_b + R21*fy_b + R22*fz_b) / mass
@@ -145,13 +153,14 @@ def export_model_underwater():
     
     # 机体角速度求导
     # 计算三轴扭矩输入 (控制力矩)
-    mx = l*Ct*((w2**2 + w6**2)*SX.cos(alpha) - (w4**2 + w8**2)*SX.cos(beta)) \
-             + m2*SX.sin(alpha) + m6*SX.sin(alpha) + m4*SX.sin(beta) + m8*SX.sin(beta)
+    mx = l*Ct*((w2**2 + w6**2)*SX.cos(alpha_eff) - (w4**2 + w8**2)*SX.cos(beta_eff)) \
+             + m2*SX.sin(alpha_eff) + m6*SX.sin(alpha_eff) + m4*SX.sin(beta_eff) + m8*SX.sin(beta_eff)
     my = l*Ct*( -w1**2 - w5**2 + w3**2 + w7**2 ) 
-    mz = -l*Ct*( (w2**2 + w6**2)*SX.sin(alpha) - (w4**2 + w8**2)*SX.sin(beta) ) \
-             + m1 + m3 + m5 + m7 \
-             + m2*SX.cos(alpha) + m6*SX.cos(alpha) \
-             + m4*SX.cos(beta)  + m8*SX.cos(beta) 
+    mz_lr = -l*((f2 + f6)*SX.sin(alpha_eff) - (f4 + f8)*SX.sin(beta_eff)) \
+        + (m2 + m6)*SX.cos(alpha_eff) \
+        + (m4 + m8)*SX.cos(beta_eff)
+    mz_other = (m1 + m3 + m5 + m7)
+    mz = k_yaw_lr*mz_lr + k_yaw_other*mz_other
     # 计算角速度导数 (加入扰动力矩)
     wx_d = (mx + dist_mx + Iyy*wy*wz - Izz*wy*wz)/Ixx
     wy_d = (my + dist_my - Ixx*wx*wz + Izz*wx*wz)/Iyy

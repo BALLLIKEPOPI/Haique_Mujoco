@@ -86,7 +86,7 @@
       <site name="motor6_site" pos="-0.3025 0.0015 -0.061"  size="0.01" rgba="1 0 0 1"/>
       <body name="left_arm_link" pos="0 0.1015 0">
         <inertial pos="-2.04e-06 0.159654 1.14e-05" quat="0.707008 0.707096 0.0087542 -0.0087967" mass="0.0869367" diaginertia="0.000672621 0.000671009 2.36e-05"/>
-        <joint name="left_arm_joint" pos="0 0 0" axis="0 1 0" range="-1.57 1.57" damping="0.5" armature="0.01"/>
+        <joint name="left_arm_joint" pos="0 0 0" axis="0 1 0" range="0 3.1416" damping="0.5" armature="0.01"/>
         <geom class="visual" mesh="left_arm_link"/>
         <geom class="collision" mesh="left_arm_link"/>
         <body name="motor1_link" pos="0.000462356 0.2005 0.0199947">
@@ -106,7 +106,7 @@
       </body>
       <body name="right_arm_link" pos="0 -0.1015 0">
         <inertial pos="1.57e-06 -0.159654 -1.045e-05" quat="0.706783 0.706883 0.0196581 -0.0196989" mass="0.0869367" diaginertia="0.000672625 0.000671005 2.356e-05"/>
-        <joint name="right_arm_joint" pos="0 0 0" axis="0 1 0" range="-1.57 1.57"/>
+        <joint name="right_arm_joint" pos="0 0 0" axis="0 1 0" range="0 3.1416" damping="0.5" armature="0.01"/>
         <geom class="visual" mesh="right_arm_link"/>
         <geom class="collision" mesh="right_arm_link"/>
         <body name="motor3_link" pos="0.00115134 -0.2005 0.0199668">
@@ -139,8 +139,8 @@
     <motor name="motor7" joint="motor7_joint"/>
     
     <!-- Arm servo actuators -->
-    <position name="left_servo"  joint="left_arm_joint"   kp="8" kv="0.1"/>
-    <position name="right_servo" joint="right_arm_joint"  kp="8" kv="0.1"/>
+    <position name="left_servo"  joint="left_arm_joint"   kp="8" kv="2.0"/>
+    <position name="right_servo" joint="right_arm_joint"  kp="8" kv="2.0"/>
 
     <!-- Propeller thrust actuators - Coaxial counter-rotating configuration
          Each arm has upper (CW/CCW) and lower (opposite) motors
@@ -152,14 +152,14 @@
          Left arm:  motor1(上,CCW) + motor5(下,CW)
          Right arm: motor3(上,CCW) + motor7(下,CW)
     -->
-    <motor class="haique" ctrlrange="0 1" gear="0 0 17.75 0 0 -1.0" site="motor0_site" name="prop_motor0"/><!-- Front上,CW -->
-    <motor class="haique" ctrlrange="0 1" gear="0 0 17.75 0 0  1.0" site="motor1_site" name="prop_motor1"/><!-- Left上,CCW -->
-    <motor class="haique" ctrlrange="0 1" gear="0 0 17.75 0 0 -1.0" site="motor2_site" name="prop_motor2"/><!-- Rear上,CW -->
-    <motor class="haique" ctrlrange="0 1" gear="0 0 17.75 0 0  1.0" site="motor3_site" name="prop_motor3"/><!-- Right上,CCW -->
-    <motor class="haique" ctrlrange="0 1" gear="0 0 17.75 0 0  1.0" site="motor4_site" name="prop_motor4"/><!-- Front下,CCW -->
-    <motor class="haique" ctrlrange="0 1" gear="0 0 17.75 0 0 -1.0" site="motor5_site" name="prop_motor5"/><!-- Left下,CW -->
-    <motor class="haique" ctrlrange="0 1" gear="0 0 17.75 0 0  1.0" site="motor6_site" name="prop_motor6"/><!-- Rear下,CCW -->
-    <motor class="haique" ctrlrange="0 1" gear="0 0 17.75 0 0 -1.0" site="motor7_site" name="prop_motor7"/><!-- Right下,CW -->
+    <motor class="haique" ctrlrange="0 1" gear="0 0 24 0 0 -1.0" site="motor0_site" name="prop_motor0"/><!-- Front上,CW -->
+    <motor class="haique" ctrlrange="0 1" gear="0 0 24 0 0  1.0" site="motor1_site" name="prop_motor1"/><!-- Left上,CCW -->
+    <motor class="haique" ctrlrange="0 1" gear="0 0 24 0 0 -1.0" site="motor2_site" name="prop_motor2"/><!-- Rear上,CW -->
+    <motor class="haique" ctrlrange="0 1" gear="0 0 24 0 0  1.0" site="motor3_site" name="prop_motor3"/><!-- Right上,CCW -->
+    <motor class="haique" ctrlrange="0 1" gear="0 0 24 0 0  1.0" site="motor4_site" name="prop_motor4"/><!-- Front下,CCW -->
+    <motor class="haique" ctrlrange="0 1" gear="0 0 24 0 0 -1.0" site="motor5_site" name="prop_motor5"/><!-- Left下,CW -->
+    <motor class="haique" ctrlrange="0 1" gear="0 0 24 0 0  1.0" site="motor6_site" name="prop_motor6"/><!-- Rear下,CCW -->
+    <motor class="haique" ctrlrange="0 1" gear="0 0 24 0 0 -1.0" site="motor7_site" name="prop_motor7"/><!-- Right下,CW -->
 
   </actuator>
 

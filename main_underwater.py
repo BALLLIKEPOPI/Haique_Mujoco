@@ -3,32 +3,56 @@
 import mujoco 
 import mujoco.viewer as viewer 
 import numpy as np
+from os.path import abspath, dirname, join
 from nmpc_controller_underwater import NMPC_Controller
 from trajectory_generator import TrajectoryGenerator
 from eso_observer import ESO_Observer
 
-# 新建NMPC控制器
-controller = NMPC_Controller()
+from config_loader import get_mode_config, get_value
+
+
+CONFIG_PATH = join(dirname(abspath(__file__)), "config.yaml")
+CFG = get_mode_config("underwater", path=CONFIG_PATH)
+
+left_servo_offset = float(get_value(CFG, "servo.left_offset", -0.1))
+right_servo_offset = float(get_value(CFG, "servo.right_offset", 0.0))
+
+# 新建NMPC控制器（将舵机安装偏置传入控制器，使“pi/2”对应物理舵机角）
+controller = NMPC_Controller(
+    left_servo_offset=left_servo_offset,
+    right_servo_offset=right_servo_offset,
+    config_path=CONFIG_PATH,
+)
 
 # 新建轨迹生成器
 trajectory_gen = TrajectoryGenerator()
 
-gravity = 9.8066        # 重力加速度 单位m/s^2
-mass = 4.672            # 飞行器质量 单位kg
-Ct = 0.1757            # 电机推力系数 (N/krpm^2)
-Cd = 0.02          # 电机反扭系数 (Nm/krpm^2)
+gravity = float(get_value(CFG, "physical.g", 9.8066))
+mass = float(get_value(CFG, "physical.mass", 4.672))
+Ct = float(get_value(CFG, "physical.Ct", 0.0267))
+Cd = float(get_value(CFG, "physical.Cd", 0.00111))
 
-arm_length = 0.605/2.0  # 电机力臂长度 单位m
-max_thrust = 17.75     # 单个电机最大推力 单位N (电机最大转速22krpm)
-max_torque = 0.02  # 单个电机最大扭矩 单位Nm (电机最大转速22krpm)
-left_servo_offset = -0.1
-right_servo_offset = -0.0
+dq = float(get_value(CFG, "physical.dq", 0.605))
+arm_length = dq / 2.0
+max_thrust = float(get_value(CFG, "sim.max_thrust", 24.0))
+max_torque = float(get_value(CFG, "sim.max_torque", 0.02))
 
-# 仿真周期 100Hz 10ms 0.01s
-dt = 0.01
+# 控制周期（NMPC/ESO 的离散时间假设）
+control_dt = float(get_value(CFG, "sim.control_dt", 0.01))
 
-# 新建ESO扰动观测器
-eso = ESO_Observer(mode='underwater', dt=dt)
+# 舵机指令整形：NMPC 的输出会有高频微抖，直接给 MuJoCo position actuator 会激发振荡。
+# 这里做最小处理：一阶低通 + 速率限制（单位：rad, rad/s）。
+servo_lpf_tau = float(get_value(CFG, "sim.servo_lpf_tau", 0.06))
+servo_rate_limit = float(get_value(CFG, "sim.servo_rate_limit", 3.0))  # rad/s
+
+# 新建ESO扰动观测器（与 control_dt 保持一致）
+eso = ESO_Observer(
+    mode="underwater",
+    dt=control_dt,
+    left_servo_offset=left_servo_offset,
+    right_servo_offset=right_servo_offset,
+    config_path=CONFIG_PATH,
+)
 
 # 根据电机转速计算电机推力
 def calc_motor_force(krpm):
@@ -38,7 +62,8 @@ def calc_motor_force(krpm):
 # 根据电机转速计算电机归一化输入
 # 偶数索引电机（0,2,4,6）保持单向推力，奇数索引电机允许反向（-1~1）
 def calc_motor_input(krpm, idx):
-    krpm = np.clip(krpm, -22.0, 22.0)
+    max_speed = float(get_value(CFG, "nmpc.max_speed", 30.0))
+    krpm = np.clip(krpm, -max_speed, max_speed)
 
     # 计算推力（带符号），再按最大正向推力归一化
     _force = calc_motor_force(krpm)
@@ -82,11 +107,23 @@ def rotation_matrix(q0, q1, q2, q3):
 
 log_count = 0
 eso_enable = True  # 默认启用ESO（可通过命令行参数修改）
-last_control = np.zeros(10) # 存储上一时刻的控制量
+
+# NMPC/ESO 以 control_dt 更新，其余仿真步保持上一控制量
+last_nmpc_time = -1.0
+held_control = np.zeros(10)
+last_control_for_eso = np.zeros(10)
+
 last_quat_main = np.array([1.0, 0.0, 0.0, 0.0])
 
+# 记录舵机“实际下发”的滤波值（MuJoCo ctrl 是 joint target，单位 rad）
+servo_cmd_filt = np.array([
+    (np.pi / 2) + left_servo_offset,
+    (np.pi / 2) + right_servo_offset,
+], dtype=float)
+
 def control_callback(m, d):
-    global log_count, gravity, mass, controller, trajectory_gen, eso, eso_enable, last_control, last_quat_main
+    global log_count, gravity, mass, controller, trajectory_gen, eso, eso_enable
+    global last_nmpc_time, held_control, last_control_for_eso, last_quat_main, servo_cmd_filt
 
     pos = d.qpos[:3]        # [x, y, z]
     quat = d.qpos[3:7]      # [qw, qx, qy, qz]
@@ -104,23 +141,29 @@ def control_callback(m, d):
     # [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz]
     current_state = np.concatenate([pos, quat, vel, omega])
     
-    # 从轨迹生成器获取目标位置
-    goal_position = trajectory_gen.get_reference(d.time)
+    # 控制更新节拍：MuJoCo 可能是 500Hz（timestep=0.002），这里按 control_dt 运行 NMPC/ESO。
+    do_update = (last_nmpc_time < 0.0) or ((d.time - last_nmpc_time) >= (control_dt - 1e-9))
 
-    # NMPC Update（获取扰动补偿可选）
-    # 获取扰动估计（可选用于前馈补偿）
-    if eso_enable:
-        # 使用上一时刻的控制量更新ESO
-        dist_f, dist_m = eso.update(state_obs, last_control, quat)
-        disturbance = {
-            'force': dist_f,
-            'torque': dist_m
-        }
-    else:
-        disturbance = None
-        
-    _dt, _control = controller.nmpc_position_control(current_state, goal_position, disturbance)
-    last_control = _control.copy()
+    if do_update:
+        last_nmpc_time = float(d.time)
+
+        # 从轨迹生成器获取目标位置 + 速度前馈
+        goal_position, goal_velocity = trajectory_gen.get_reference_state(d.time)
+
+        # 获取扰动估计（可选用于前馈补偿）
+        if eso_enable:
+            dist_f, dist_m = eso.update(state_obs, last_control_for_eso, quat)
+            disturbance = {'force': dist_f, 'torque': dist_m}
+        else:
+            disturbance = None
+
+        _solve_dt, new_control = controller.nmpc_position_control(
+            current_state, goal_position, disturbance, goal_vel=goal_velocity
+        )
+        held_control = new_control.copy()
+        last_control_for_eso = held_control.copy()
+
+    _control = held_control
     
     # 计算实际的8个电机转速
     motor_speeds = np.array([
@@ -141,8 +184,27 @@ def control_callback(m, d):
     for i in range(8):
         d.actuator(f'prop_motor{i}').ctrl[0] = calc_motor_input(motor_speeds[i], i)
 
-    d.actuator('left_servo').ctrl[0] = _control[8] + left_servo_offset   # ~90 degrees
-    d.actuator('right_servo').ctrl[0] = _control[9] + right_servo_offset
+    # ---- 舵机指令整形：低通 + 限速 + 夹到 joint range ----
+    servo_des = np.array([
+        _control[8] + left_servo_offset,
+        _control[9] + right_servo_offset,
+    ], dtype=float)
+
+    # 一阶低通
+    sim_dt = float(m.opt.timestep)
+    alpha = sim_dt / (servo_lpf_tau + sim_dt)
+    servo_lpf = servo_cmd_filt + alpha * (servo_des - servo_cmd_filt)
+
+    # 速率限制
+    max_step = servo_rate_limit * sim_dt
+    step = np.clip(servo_lpf - servo_cmd_filt, -max_step, max_step)
+    servo_cmd_filt = servo_cmd_filt + step
+
+    # 夹紧到 joint 的物理范围（haique.xml 里已是 [0, pi]）
+    servo_cmd_filt = np.clip(servo_cmd_filt, 0.0, float(np.pi))
+
+    d.actuator('left_servo').ctrl[0] = float(servo_cmd_filt[0])
+    d.actuator('right_servo').ctrl[0] = float(servo_cmd_filt[1])
 
     # 测试用例：舵机固定位置
     # d.actuator('left_servo').ctrl[0] = np.pi/2 + left_servo_offset   # ~90 degrees
@@ -179,7 +241,7 @@ if __name__ == '__main__':
         """
     )
     parser.add_argument('mode', type=str, nargs='?', default=None,
-                        help='飞行模式 (1-5)')
+                        help='飞行模式 (1-6)')
     parser.add_argument('--eso', dest='eso_enable', action='store_true', 
                         default=True, help='启用ESO扰动观测器（默认启用）')
     parser.add_argument('--no-eso', dest='eso_enable', action='store_false',
@@ -200,12 +262,13 @@ if __name__ == '__main__':
     print("  3 - 画方形模式 (Square)")
     print("  4 - 连续爬升 (Climb: 0m → 2.5m, 从地面起飞) ⭐推荐")
     print("  5 - 自动演示 (Auto Demo)")
+    print("  6 - 匀速前进 (Constant Forward)")
     
     # 如果有命令行参数，使用命令行参数，否则交互式输入
     if args.mode is not None:
         mode_choice = args.mode
     else:
-        mode_choice = input("\n请选择模式 (1-5，默认1): ").strip() or "1"
+        mode_choice = input("\n请选择模式 (1-6，默认1): ").strip() or "1"
     
     # 设置初始模式
     if mode_choice == "2":
@@ -225,6 +288,9 @@ if __name__ == '__main__':
         trajectory_gen.set_mode('hover')
         print(f"\n✓ 已选择: 自动演示模式")
         print("  → 程序将自动切换轨迹")
+    elif mode_choice == "6":
+        trajectory_gen.set_mode('forward')
+        print(f"\n✓ 已选择: 匀速前进模式")
     else:
         trajectory_gen.set_mode('hover')
         print(f"\n✓ 已选择: 悬停模式")

@@ -1,30 +1,48 @@
 import numpy as np
 import csv
 
-class ESO_Observer:
-    def __init__(self, dt=0.01, mode='aerial'):
-        # 1. 物理参数
-        self.mode = mode
-        self.g0 = 9.8066
-        self.mass = 4.672
-        self.dt = dt
+from typing import Optional
+from os.path import abspath, dirname, join
 
-        if self.mode == 'aerial':
-            # 严格对应 export_model.py
-            self.inertia = np.array([0.10170715, 0.10222875, 0.16095642])
-            self.Ct = 0.1757
-            self.Cd = 0.02
-            self.l = 0.605 / 2.0
-            self.k_yaw = 0.8
-        elif self.mode == 'underwater':
-            # 对应 export_model_underwater.py
-            self.inertia = np.array([0.10170715, 0.10222875, 0.16095642])
-            self.Ct = 0.1757
-            self.Cd = 0.02
-            self.dq = 0.605
-            self.l = self.dq / 2.0
-        else:
-            raise ValueError(f"Unknown mode: {mode}")
+from config_loader import get_mode_config, get_value
+
+class ESO_Observer:
+    def __init__(
+        self,
+        dt: float = 0.01,
+        mode: str = "aerial",
+        left_servo_offset: Optional[float] = None,
+        right_servo_offset: Optional[float] = None,
+        config_path: str = join(dirname(abspath(__file__)), "config.yaml"),
+    ):
+        # 1. 物理参数（从配置读取，保证与模型/NMPC 一致）
+        self.mode = str(mode)
+        self.dt = float(dt)
+
+        cfg = get_mode_config(self.mode, path=config_path)
+
+        self.g0 = float(get_value(cfg, "physical.g", 9.8066))
+        self.mass = float(get_value(cfg, "physical.mass", 4.672))
+        inertia = get_value(cfg, "physical.inertia", [0.10170715, 0.10222875, 0.16095642])
+        self.inertia = np.asarray(inertia, dtype=float)
+        self.Ct = float(get_value(cfg, "physical.Ct", 0.0267))
+        self.Cd = float(get_value(cfg, "physical.Cd", 0.00111))
+        self.dq = float(get_value(cfg, "physical.dq", 0.605))
+        self.l = self.dq / 2.0
+
+        # MuJoCo 中实际舵机角 = 控制输出 + offset。
+        # 这里保存 offset，供 underwater 模式下计算“物理角”。
+        cfg_left_offset = float(get_value(cfg, "servo.left_offset", -0.1))
+        cfg_right_offset = float(get_value(cfg, "servo.right_offset", 0.0))
+        self.left_servo_offset = float(cfg_left_offset if left_servo_offset is None else left_servo_offset)
+        self.right_servo_offset = float(cfg_right_offset if right_servo_offset is None else right_servo_offset)
+
+        # yaw mixing factors
+        self.k_yaw_lr = float(get_value(cfg, "model.k_yaw_lr", 1.5))
+        self.k_yaw_other = float(get_value(cfg, "model.k_yaw_other", 0.3))
+
+        # export_model.py uses yaw bias mixing; keep default unless configured later.
+        self.k_yaw = 0.8
 
         # 2. 状态变量 [z1: 状态跟踪, z2: 扰动估计]
         # 0-2: vx, vy, vz (世界坐标系线速度)
@@ -33,8 +51,8 @@ class ESO_Observer:
         self.z2 = np.zeros(6)
 
         # 3. NLESO 增益参数 (需要根据实际表现微调)
-        omega_pos = 15.0  # 位置/速度观测带宽
-        omega_att = 25.0  # 姿态/角速度观测带宽
+        omega_pos = float(get_value(cfg, "eso.omega_pos", 15.0))  # 位置/速度观测带宽
+        omega_att = float(get_value(cfg, "eso.omega_att", 25.0))  # 姿态/角速度观测带宽
         self.beta1 = np.array([2*omega_pos]*3 + [2*omega_att]*3)
         self.beta2 = np.array([omega_pos**2]*3 + [omega_att**2]*3)
 
@@ -94,99 +112,74 @@ class ESO_Observer:
         return acc_w, np.array([mx, my, mz])
 
     def _get_control_effect_underwater(self, u, quat):
-        """
-        根据输入 u=[w1..w8, alpha, beta] 和当前姿态计算理论加速度和力矩
-        逻辑严格对应 export_model_underwater.py
+        """Underwater: compute theoretical acceleration (world) and torques (body).
+
+        u = [w1..w8, alpha_cmd, beta_cmd]
+        NOTE: MuJoCo 实际舵机角 = cmd + offset，因此这里必须用物理角参与三角分解。
         """
         if u is None or len(u) < 10:
             return np.zeros(3), np.zeros(3)
-        
-        # u: w1, w2, w3, w4, w5, w6, w7, w8, alpha, beta
-        w = u[:8]
-        alpha = u[8]
-        beta = u[9]
 
-        # 计算 f1..f8 (Ct * w * |w|)
+        w = np.asarray(u[:8], dtype=float)
+        alpha_cmd = float(u[8])
+        beta_cmd = float(u[9])
+
+        alpha = alpha_cmd + self.left_servo_offset
+        beta = beta_cmd + self.right_servo_offset
+
+        # thrust per motor
         f = self.Ct * w * np.abs(w)
 
-        # 计算 m1..m8 (Cd/Ct * f or Cd*w*|w| depending on prop rotation)
-        # export_model_underwater.py:
-        # m1 = -Cd * w1**2 (approx w1*|w1|) -> sign matter? 
-        # export_model: m1 = -Cd * w1^2. But w1 can be negative in underwater?
-        # In export_model_underwater: m1 = -Cd * w1^2 if w1 is squared? 
-        # Actually export_model_underwater.py says:
-        # m1 = -Cd * w1**2
-        # m2 = Cd * w2 * SX.fabs(w2)
-        # ...
-        # NOTE: w is usually positive for simple quad but underwater can reverse?
-        # Let's strictly follow export_model_underwater logic.
-        
+        # reaction torques per motor (signs follow export_model_underwater.py)
         m = np.zeros(8)
-        # Odd motors (1,3,5,7 in 1-based index -> 0,2,4,6 in 0-based)
-        # Even motors (2,4,6,8 in 1-based index -> 1,3,5,7 in 0-based)
-        
-        # Index 0 (w1): m1 = -Cd * w1**2
-        m[0] = -self.Cd * (w[0]**2)
-        # Index 1 (w2): m2 = Cd * w2 * abs(w2)
+        m[0] = -self.Cd * (w[0] ** 2)
         m[1] = self.Cd * w[1] * np.abs(w[1])
-        # Index 2 (w3): m3 = -Cd * w3**2
-        m[2] = -self.Cd * (w[2]**2)
-        # Index 3 (w4): m4 = Cd * w4 * abs(w4)
+        m[2] = -self.Cd * (w[2] ** 2)
         m[3] = self.Cd * w[3] * np.abs(w[3])
-        # Index 4 (w5): m5 = Cd * w5**2  <-- Note: export_model says m5 = Cd * w5**2
-        m[4] = self.Cd * (w[4]**2)
-        # Index 5 (w6): m6 = -Cd * w6 * abs(w6)
+        m[4] = self.Cd * (w[4] ** 2)
         m[5] = -self.Cd * w[5] * np.abs(w[5])
-        # Index 6 (w7): m7 = Cd * w7**2
-        m[6] = self.Cd * (w[6]**2)
-        # Index 7 (w8): m8 = -Cd * w8 * abs(w8)
+        m[6] = self.Cd * (w[6] ** 2)
         m[7] = -self.Cd * w[7] * np.abs(w[7])
 
-        # Body forces
-        # fx_b = f2*sin(a) + f4*sin(b) + f6*sin(a) + f8*sin(b)
-        fx_b = f[1]*np.sin(alpha) + f[3]*np.sin(beta) + f[5]*np.sin(alpha) + f[7]*np.sin(beta)
+        # body forces
+        fx_b = f[1] * np.sin(alpha) + f[3] * np.sin(beta) + f[5] * np.sin(alpha) + f[7] * np.sin(beta)
         fy_b = 0.0
-        # fz_b = f1 + f2*cos(a) + f3 + f4*cos(b) + f5 + f6*cos(a) + f7 + f8*cos(b)
-        fz_b = f[0] + f[1]*np.cos(alpha) + f[2] + f[3]*np.cos(beta) + \
-               f[4] + f[5]*np.cos(alpha) + f[6] + f[7]*np.cos(beta)
+        fz_b = (
+            f[0] + f[1] * np.cos(alpha) + f[2] + f[3] * np.cos(beta)
+            + f[4] + f[5] * np.cos(alpha) + f[6] + f[7] * np.cos(beta)
+        )
 
-        # Rotate to World frame
-        # quat: [q0, q1, q2, q3] -> [w, x, y, z]
+        # rotate body force to world and divide by mass
         q0, q1, q2, q3 = quat
-        
-        # Rotation matrix Rwb
-        # Row 0
-        r00 = 1 - 2*(q2**2 + q3**2)
-        r01 = 2*(q1*q2 - q0*q3)
-        r02 = 2*(q1*q3 + q0*q2)
-        # Row 1
-        r10 = 2*(q1*q2 + q0*q3)
-        r11 = 1 - 2*(q1**2 + q3**2)
-        r12 = 2*(q2*q3 - q0*q1)
-        # Row 2
-        r20 = 2*(q1*q3 - q0*q2)
-        r21 = 2*(q2*q3 + q0*q1)
-        r22 = 1 - 2*(q1**2 + q2**2)
+        r00 = 1 - 2 * (q2**2 + q3**2)
+        r01 = 2 * (q1 * q2 - q0 * q3)
+        r02 = 2 * (q1 * q3 + q0 * q2)
+        r10 = 2 * (q1 * q2 + q0 * q3)
+        r11 = 1 - 2 * (q1**2 + q3**2)
+        r12 = 2 * (q2 * q3 - q0 * q1)
+        r20 = 2 * (q1 * q3 - q0 * q2)
+        r21 = 2 * (q2 * q3 + q0 * q1)
+        r22 = 1 - 2 * (q1**2 + q2**2)
 
-        acc_x = (r00*fx_b + r01*fy_b + r02*fz_b) / self.mass
-        acc_y = (r10*fx_b + r11*fy_b + r12*fz_b) / self.mass
-        acc_z = (r20*fx_b + r21*fy_b + r22*fz_b) / self.mass - self.g0
+        acc_w = np.array([
+            (r00 * fx_b + r01 * fy_b + r02 * fz_b) / self.mass,
+            (r10 * fx_b + r11 * fy_b + r12 * fz_b) / self.mass,
+            (r20 * fx_b + r21 * fy_b + r22 * fz_b) / self.mass - self.g0,
+        ])
 
-        acc_w = np.array([acc_x, acc_y, acc_z])
+        # body torques
+        mx = self.l * self.Ct * ((w[1] ** 2 + w[5] ** 2) * np.cos(alpha) - (w[3] ** 2 + w[7] ** 2) * np.cos(beta)) + (
+            m[1] * np.sin(alpha) + m[5] * np.sin(alpha) + m[3] * np.sin(beta) + m[7] * np.sin(beta)
+        )
+        my = self.l * self.Ct * (-w[0] ** 2 - w[4] ** 2 + w[2] ** 2 + w[6] ** 2)
 
-        # Body Torques
-        # mx
-        mx = self.l * self.Ct * ((w[1]**2 + w[5]**2)*np.cos(alpha) - (w[3]**2 + w[7]**2)*np.cos(beta)) + \
-             m[1]*np.sin(alpha) + m[5]*np.sin(alpha) + m[3]*np.sin(beta) + m[7]*np.sin(beta)
-        
-        # my
-        my = self.l * self.Ct * (-w[0]**2 - w[4]**2 + w[2]**2 + w[6]**2)
-
-        # mz
-        mz = -self.l * self.Ct * ((w[1]**2 + w[5]**2)*np.sin(alpha) - (w[3]**2 + w[7]**2)*np.sin(beta)) + \
-             m[0] + m[2] + m[4] + m[6] + \
-             m[1]*np.cos(alpha) + m[5]*np.cos(alpha) + \
-             m[3]*np.cos(beta) + m[7]*np.cos(beta)
+        mz_lr = (
+            -self.l * ((f[1] + f[5]) * np.sin(alpha) - (f[3] + f[7]) * np.sin(beta))
+            + (m[1] + m[5]) * np.cos(alpha)
+            + (m[3] + m[7]) * np.cos(beta)
+        )
+        mz_other = (m[0] + m[2] + m[4] + m[6])
+        mz = self.k_yaw_lr * mz_lr + self.k_yaw_other * mz_other
 
         return acc_w, np.array([mx, my, mz])
 

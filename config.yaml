@@ -1,0 +1,93 @@
+{
+  "underwater": {
+    "physical": {
+      "g": 9.8066,
+      "mass": 4.672,
+      "inertia": [0.10170715, 0.10222875, 0.16095642],
+      "Ct": 0.0267,
+      "Cd": 0.00111,
+      "dq": 0.605
+    },
+    "servo": {
+      "left_offset": -0.1,
+      "right_offset": 0.0,
+      "max_dev_deg": 45.0
+    },
+    "model": {
+      "k_yaw_lr": 1.5,
+      "k_yaw_other": 0.3
+    },
+    "sim": {
+      "control_dt": 0.01,
+      "servo_lpf_tau": 0.06,
+      "servo_rate_limit": 3.0,
+      "max_thrust": 24.0,
+      "max_torque": 0.02
+    },
+    "nmpc": {
+      "Tf": 0.5,
+      "N": 30,
+      "max_speed": 30.0,
+      "W_e_scale": 50.0,
+      "dist_force_clip": [60.0, 60.0, 60.0],
+      "dist_torque_clip": [12.0, 12.0, 12.0],
+      "dist_lpf_alpha": 0.2,
+      "Q_diag": [
+        300.0, 300.0, 320.0,
+        0.0, 120.0, 360.0, 50.0,
+        120.0, 120.0, 90.0,
+        120.0, 120.0, 80.0
+      ],
+      "R_diag": [
+        0.10, 0.10, 0.10, 0.10, 0.10, 0.10, 0.10, 0.10,
+        35.0, 35.0
+      ],
+      "penalties": {
+        "k_coax": 0.03,
+        "k_front_rear": 0.02
+      }
+    },
+    "eso": {
+      "omega_pos": 15.0,
+      "omega_att": 25.0
+    }
+  },
+  "aerial": {
+    "physical": {
+      "g": 9.8066,
+      "mass": 4.672,
+      "inertia": [0.10170715, 0.10222875, 0.16095642],
+      "Ct": 0.1757,
+      "Cd": 0.02,
+      "dq": 0.605
+    },
+    "model": {
+      "k_yaw": 0.8
+    },
+    "sim": {
+      "control_dt": 0.01,
+      "max_thrust": 17.75,
+      "max_torque": 0.02
+    },
+    "nmpc": {
+      "Tf": 0.6,
+      "N": 30,
+      "max_speed": 22.0,
+      "W_e_scale": 10.0,
+      "Q_diag": [
+        180.0, 180.0, 260.0,
+        10.0, 60.0, 80.0, 80.0,
+        80.0, 80.0, 260.0,
+        120.0, 120.0, 80.0
+      ],
+      "R_diag": [
+        0.95, 0.95, 0.95, 0.95,
+        0.40
+      ]
+    },
+    "eso": {
+      "omega_pos": 15.0,
+      "omega_att": 25.0
+    }
+  }
+}

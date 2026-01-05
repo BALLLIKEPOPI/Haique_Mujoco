@@ -2,17 +2,19 @@
 from acados_template import AcadosModel
 from casadi import SX, vertcat
 
-def export_model():
+def export_model(
+    *,
+    g0: float = 9.8066,
+    mass: float = 4.672,
+    inertia=(0.10170715, 0.10222875, 0.16095642),
+    Ct: float = 0.1757,
+    Cd: float = 0.02,
+    dq: float = 0.605,
+    k_yaw: float = 0.8,
+):
     model_name = 'crazyflie'
     # parameters
-    g0  = 9.8066     # [m.s^2] accerelation of gravity
-    mass  = 4.672      # [kg] total mass (with one marker)
-    Ixx = 0.10170715   # [kg.m^2] Inertia moment around x-axis
-    Iyy = 0.10222875   # [kg.m^2] Inertia moment around y-axis
-    Izz = 0.16095642   # [kg.m^2] Inertia moment around z-axis
-    Ct  = 0.1757       # [N/krpm^2] Thrust coef (推力系数) - 修正：之前与Cd值写反了
-    Cd  = 0.02         # [Nm/krpm^2] Drag coef (反扭系数) - 修正为与haique.xml一致
-    dq  = 0.605      # [m] distance between motors' center
+    Ixx, Iyy, Izz = inertia
     l   = dq/2       # [m] distance between motors' center and the axis of rotation
 
     # 世界坐标系位置
@@ -73,7 +75,7 @@ def export_model():
     py_d = vy
     pz_d = vz
 
-    k_yaw = 0.8  # Yaw coupling factor (10% of base speed)
+    # Yaw coupling factor
     w1_ = w1 * (1 - k_yaw * yaw_bias)  # Front上,CW
     w2_ = w2 * (1 + k_yaw * yaw_bias)   # Left上,CCW
     w3_ = w3 * (1 - k_yaw * yaw_bias)   # Rear上,CW

@@ -90,8 +90,6 @@ static int casadi_f0(const casadi_real** arg, casadi_real** res, casadi_int* iw,
   a05=casadi_fabs(a03);
   a06=(a04*a05);
   a07=arg[2]? arg[2][8] : 0;
-  a08=-1.0000000000000001e-01;
-  a07=(a07+a08);
   a08=sin(a07);
   a09=(a06*a08);
   a10=arg[2]? arg[2][3] : 0;
