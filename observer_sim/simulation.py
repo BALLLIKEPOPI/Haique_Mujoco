@@ -174,18 +174,22 @@ class SimulationRunner:
 def create_test_disturbance():
     """创建测试扰动配置"""
     def force_func(t):
-        # 5秒后施加阶跃扰动
+        # 5秒后施加阶跃扰动（仅Fx，Fy和Fz设为0）
         if t > 5.0:
-            return np.array([2.0, 1.0, -1.5])
+            return np.array([
+            4.0,  # Fx 保留
+            0.0,  # Fy = 0
+            0.0   # Fz = 0
+        ])
         else:
             return np.zeros(3)
     
     def torque_func(t):
-        # 10秒后施加正弦扰动
+        # 10秒后施加正弦扰动（仅Mz，Mx和My设为0）
         if t > 10.0:
             return np.array([
-                0.5 * np.sin(2 * np.pi * 0.1 * t),
-                0.3 * np.sin(2 * np.pi * 0.15 * t),
+                0.0,  # Mx = 0
+                0.0,  # My = 0,
                 0.2 * np.sin(2 * np.pi * 0.2 * t)
             ])
         else:

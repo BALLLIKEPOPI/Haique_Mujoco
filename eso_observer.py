@@ -241,9 +241,9 @@ class ESO_Observer:
             # 力通道：限制加速度扰动在 ±5 m/s^2 (对应 ±35 N)
             # 力矩通道：限制角加速度扰动在 ±20 rad/s^2 (对应 ±2 Nm)
             if i < 3:
-                self.z2[i] = np.clip(self.z2[i], -5.0, 5.0)  # 力通道
+                self.z2[i] = np.clip(self.z2[i], -2.0, 2.0)  # 力通道
             else:
-                self.z2[i] = np.clip(self.z2[i], -20.0, 20.0)  # 力矩通道
+                self.z2[i] = np.clip(self.z2[i], -10.0, 10.0)  # 力矩通道
 
         dist_f = self.z2[:3] * self.mass  
         dist_m = self.z2[3:6] * self.inertia
