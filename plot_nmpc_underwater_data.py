@@ -20,14 +20,16 @@ if missing:
 
 df = _df
 has_disturbance = {'dist_fx', 'dist_fy', 'dist_fz', 'dist_mx', 'dist_my', 'dist_mz'}.issubset(df.columns)
+has_actual_disturbance = {'actual_dist_fx', 'actual_dist_fy', 'actual_dist_fz', 
+                          'actual_dist_mx', 'actual_dist_my', 'actual_dist_mz'}.issubset(df.columns)
 
-# 布局：有扰动 6x3，共 18 个子图；无扰动 5x3，共 15 个子图
-if has_disturbance:
+# 布局：根据扰动数据调整
+if has_disturbance and has_actual_disturbance:
+    fig = plt.figure(figsize=(24, 18))
+    n_rows, n_cols = 7, 3  # 扩展到7行以显示ESO vs 实际扰动对比
+elif has_disturbance:
     fig = plt.figure(figsize=(24, 16))
     n_rows, n_cols = 6, 3
-else:
-    fig = plt.figure(figsize=(22, 14))
-    n_rows, n_cols = 5, 3
 
 # 1-3 位置跟踪
 ax1 = plt.subplot(n_rows, n_cols, 1)
@@ -201,9 +203,61 @@ Torque (Nm):
         ax18.text(0.5, 0.5, 'No valid data', ha='center', va='center')
         ax18.set_title('Fz vs |F| (No Data)')
 
-if has_disturbance:
+
+# ========== 实际扰动 vs ESO估计对比 ========== 
+if has_actual_disturbance and has_disturbance:
+    # 第7行：实际扰动 vs ESO估计 - 力对比
+    ax19 = plt.subplot(n_rows, n_cols, 19)
+    ax19.plot(df['time'], df['actual_dist_fx'], 'r-', linewidth=1.5, label='Actual Fx', alpha=0.8)
+    ax19.plot(df['time'], df['dist_fx'], 'b--', linewidth=1.2, label='ESO Fx', alpha=0.7)
+    ax19.plot(df['time'], df['actual_dist_fy'], 'g-', linewidth=1.5, label='Actual Fy', alpha=0.8)
+    ax19.plot(df['time'], df['dist_fy'], 'c--', linewidth=1.2, label='ESO Fy', alpha=0.7)
+    ax19.plot(df['time'], df['actual_dist_fz'], 'm-', linewidth=1.5, label='Actual Fz', alpha=0.8)
+    ax19.plot(df['time'], df['dist_fz'], 'y--', linewidth=1.2, label='ESO Fz', alpha=0.7)
+    ax19.set_ylabel('Force (N)'); ax19.set_xlabel('Time (s)')
+    ax19.legend(ncol=2, fontsize=8); ax19.grid(True, alpha=0.3)
+    ax19.set_title('Actual vs ESO Force Estimation')
+
+    # 力矩对比
+    ax20 = plt.subplot(n_rows, n_cols, 20)
+    ax20.plot(df['time'], df['actual_dist_mx'], 'r-', linewidth=1.5, label='Actual Mx', alpha=0.8)
+    ax20.plot(df['time'], df['dist_mx'], 'b--', linewidth=1.2, label='ESO Mx', alpha=0.7)
+    ax20.plot(df['time'], df['actual_dist_my'], 'g-', linewidth=1.5, label='Actual My', alpha=0.8)
+    ax20.plot(df['time'], df['dist_my'], 'c--', linewidth=1.2, label='ESO My', alpha=0.7)
+    ax20.plot(df['time'], df['actual_dist_mz'], 'm-', linewidth=1.5, label='Actual Mz', alpha=0.8)
+    ax20.plot(df['time'], df['dist_mz'], 'y--', linewidth=1.2, label='ESO Mz', alpha=0.7)
+    ax20.set_ylabel('Torque (Nm)'); ax20.set_xlabel('Time (s)')
+    ax20.legend(ncol=2, fontsize=8); ax20.grid(True, alpha=0.3)
+    ax20.set_title('Actual vs ESO Torque Estimation')
+
+    # ESO估计误差
+    ax21 = plt.subplot(n_rows, n_cols, 21)
+    force_error = np.sqrt((df['dist_fx'] - df['actual_dist_fx'])**2 + 
+                         (df['dist_fy'] - df['actual_dist_fy'])**2 + 
+                         (df['dist_fz'] - df['actual_dist_fz'])**2)
+    torque_error = np.sqrt((df['dist_mx'] - df['actual_dist_mx'])**2 + 
+                          (df['dist_my'] - df['actual_dist_my'])**2 + 
+                          (df['dist_mz'] - df['actual_dist_mz'])**2)
+    ax21.plot(df['time'], force_error, 'r-', linewidth=2, label='Force Error')
+    ax21_twin = ax21.twinx()
+    ax21_twin.plot(df['time'], torque_error, 'b-', linewidth=2, label='Torque Error')
+    ax21.set_ylabel('Force Error (N)', color='r')
+    ax21_twin.set_ylabel('Torque Error (Nm)', color='b')
+    ax21.set_xlabel('Time (s)'); ax21.grid(True, alpha=0.3)
+    ax21.set_title('ESO Estimation Error')
+    ax21.legend(loc='upper left'); ax21_twin.legend(loc='upper right')
+    
+    # 添加误差统计
+    mean_f_err = np.nanmean(force_error)
+    mean_m_err = np.nanmean(torque_error)
+    ax21.text(0.98, 0.98, f'Mean F err: {mean_f_err:.3f} N\nMean M err: {mean_m_err:.4f} Nm',
+             transform=ax21.transAxes, ha='right', va='top',
+             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5), fontsize=8)
+
+if has_disturbance and has_actual_disturbance:
+    plt.suptitle('Underwater NMPC + ESO + Actual Disturbance (8 Motors + 2 Servos)', fontsize=16, fontweight='bold')
+elif has_disturbance:
     plt.suptitle('Underwater NMPC + ESO (8 Motors + 2 Servos)', fontsize=16, fontweight='bold')
-else:
     plt.suptitle('Underwater NMPC (8 Motors + 2 Servos)', fontsize=16, fontweight='bold')
 
 plt.tight_layout()

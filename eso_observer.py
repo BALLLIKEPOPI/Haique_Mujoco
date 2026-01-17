@@ -22,6 +22,11 @@ class ESO_Observer:
         cfg = get_mode_config(self.mode, path=config_path)
 
         self.g0 = float(get_value(cfg, "physical.g", 9.8066))
+        
+        # 水下浮力 (仅underwater模式)
+        rho_water = 1000.0
+        displaced_volume = 0.004774  # m^3
+        self.buoyancy = rho_water * self.g0 * displaced_volume  # 浮力 (N)
         self.mass = float(get_value(cfg, "physical.mass", 4.672))
         inertia = get_value(cfg, "physical.inertia", [0.10170715, 0.10222875, 0.16095642])
         self.inertia = np.asarray(inertia, dtype=float)
@@ -109,7 +114,11 @@ class ESO_Observer:
         mz = self.Cd * (-w1_**2 + w2_**2 - w3_**2 + w4_**2 + 
                         w5_**2 - w6_**2 + w7_**2 - w8_**2)
         
-        return acc_w, np.array([mx, my, mz])
+        # 转换为角加速度以匹配b0定义
+        torque_b = np.array([mx, my, mz])
+        angular_acc_b = torque_b / np.array(self.inertia)
+        
+        return acc_w, angular_acc_b
 
     def _get_control_effect_underwater(self, u, quat):
         """Underwater: compute theoretical acceleration (world) and torques (body).
@@ -164,7 +173,7 @@ class ESO_Observer:
         acc_w = np.array([
             (r00 * fx_b + r01 * fy_b + r02 * fz_b) / self.mass,
             (r10 * fx_b + r11 * fy_b + r12 * fz_b) / self.mass,
-            (r20 * fx_b + r21 * fy_b + r22 * fz_b) / self.mass - self.g0,
+            (r20 * fx_b + r21 * fy_b + r22 * fz_b) / self.mass - self.g0 + self.buoyancy / self.mass,
         ])
 
         # body torques
@@ -181,7 +190,11 @@ class ESO_Observer:
         mz_other = (m[0] + m[2] + m[4] + m[6])
         mz = self.k_yaw_lr * mz_lr + self.k_yaw_other * mz_other
 
-        return acc_w, np.array([mx, my, mz])
+        # 转换为角加速度以匹配b0定义
+        torque_b = np.array([mx, my, mz])
+        angular_acc_b = torque_b / np.array(self.inertia)
+
+        return acc_w, angular_acc_b
 
     def update(self, state_obs, last_u, quat):
         """
@@ -192,17 +205,28 @@ class ESO_Observer:
                Underwater: [w1..w8, alpha, beta]
         quat: 当前姿态四元数 [q0, q1, q2, q3]
         """
-        acc_theory_w, torque_theory_b = self._get_control_effect(last_u, quat)
+        acc_theory_w, angular_acc_theory_b = self._get_control_effect(last_u, quat)
+        
+        # 陀螺力矩补偿 (gyroscopic effect compensation)
+        wx, wy, wz = state_obs[3:6]
+        gyro_acc = np.array([
+            (self.inertia[1] - self.inertia[2]) * wy * wz / self.inertia[0],  # 陀螺角加速度 x
+            (self.inertia[2] - self.inertia[0]) * wx * wz / self.inertia[1],  # 陀螺角加速度 y
+            (self.inertia[0] - self.inertia[1]) * wx * wy / self.inertia[2]   # 陀螺角加速度 z
+        ])
+        
+        # 将陀螺角加速度加入控制输入，让ESO只观测外部扰动
+        angular_acc_with_gyro = angular_acc_theory_b + gyro_acc
         
         # 对应 export_model.py 的输入增益 b0
         b0 = np.array([
-            1.0, 1.0, 1.0,              # 线速度通道 (acc已处理过mass)
-            1/self.inertia[0], 1/self.inertia[1], 1/self.inertia[2] # 角速度通道
+            1.0, 1.0, 1.0,              # 线速度通道 (m/s²)
+            1.0, 1.0, 1.0               # 角速度通道 (rad/s²) - 已在_get_control_effect中转换
         ])
         
         # 理论输入向量 U
         # 注意：这里对于角速度通道，由于 export_model 中有陀螺力矩项，ESO 观测的是剩余扰动
-        u_vec = np.concatenate([acc_theory_w, torque_theory_b])
+        u_vec = np.concatenate([acc_theory_w, angular_acc_with_gyro])
 
         for i in range(6):
             e = self.z1[i] - state_obs[i]
@@ -213,7 +237,15 @@ class ESO_Observer:
             self.z1[i] += self.dt * (self.z2[i] - self.beta1[i] * fe + b0[i] * u_vec[i])
             self.z2[i] += self.dt * (-self.beta2[i] * fe1)
 
-        dist_f = self.z2[:3] * self.mass
+            # 饱和限幅：防止初始暂态或模型误差导致的z2跳变
+            # 力通道：限制加速度扰动在 ±5 m/s^2 (对应 ±35 N)
+            # 力矩通道：限制角加速度扰动在 ±20 rad/s^2 (对应 ±2 Nm)
+            if i < 3:
+                self.z2[i] = np.clip(self.z2[i], -5.0, 5.0)  # 力通道
+            else:
+                self.z2[i] = np.clip(self.z2[i], -20.0, 20.0)  # 力矩通道
+
+        dist_f = self.z2[:3] * self.mass  
         dist_m = self.z2[3:6] * self.inertia
         self.data_log.append(np.concatenate([dist_f, dist_m]))
 

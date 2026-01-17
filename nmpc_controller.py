@@ -288,7 +288,7 @@ class NMPC_Controller:
         self.acados_solver.set(0, 'lbx', current_state)
         self.acados_solver.set(0, 'ubx', current_state)
 
-        goal_state = self.referen_state_transition(current_state, goal_state)
+        # goal_state = self.referen_state_transition(current_state, goal_state)
         # 记录“实际送进NMPC”的参考，用于日志/可视化
         self._last_goal_state_used = goal_state.copy()
 
@@ -349,7 +349,7 @@ class NMPC_Controller:
 
     # NMPC位置控制
     # goal_pos: 目标三维位置[x y z]
-    def nmpc_position_control(self, current_state, goal_pos, goal_vel=None, disturbance=None):
+    def nmpc_position_control(self, current_state, goal_pos, goal_vel=None, goal_quat=None, disturbance=None):
         """
         位置控制
         
@@ -367,13 +367,22 @@ class NMPC_Controller:
         if goal_vel is not None and isinstance(goal_vel, dict):
             disturbance = goal_vel
             goal_vel = None
+        
+        # 兼容旧签名：第四个参数若是 disturbance dict，则视为 disturbance
+        if goal_quat is not None and isinstance(goal_quat, dict):
+            disturbance = goal_quat
+            goal_quat = None
 
         if goal_vel is None:
             goal_vel = np.zeros(3)
 
+        # 使用传入的目标四元数（如果提供），否则默认为[1,0,0,0]
+        if goal_quat is None:
+            goal_quat = np.array([1.0, 0.0, 0.0, 0.0])
+        
         goal_state = np.array([
             goal_pos[0], goal_pos[1], goal_pos[2],
-            1.0, 0.0, 0.0, 0.0,
+            goal_quat[0], goal_quat[1], goal_quat[2], goal_quat[3],
             goal_vel[0], goal_vel[1], goal_vel[2],
             0.0, 0.0, 0.0,
         ])

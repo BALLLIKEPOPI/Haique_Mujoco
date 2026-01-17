@@ -140,26 +140,44 @@ class NMPC_Controller:
                 a[int(idx)] = float(c)
             R[:, :] = R + k * np.outer(a, a)
 
-        # 四个竖直推进器在控制向量中的索引（对应 motor0,motor2,motor4,motor6）
-        idx_front_up = 0
-        idx_rear_up = 2
-        idx_front_down = 4
-        idx_rear_down = 6
+        # 电机布局:
+        # 前后电机(x方向，控制悬停和俯仰): motor0, motor2, motor4, motor6
+        idx_front_up = 0     # motor0
+        idx_rear_up = 2      # motor2
+        idx_front_down = 4   # motor4
+        idx_rear_down = 6    # motor6
+        
+        # 左右电机(y方向，控制前进、偏航、横滚): motor1, motor3, motor5, motor7
+        idx_left_up = 1      # motor1
+        idx_right_up = 3     # motor3
+        idx_left_down = 5    # motor5
+        idx_right_down = 7   # motor7
 
-        # 1) 同轴一前一后两桨尽量同速（防止只用其中一个）
-        k_coax = float(get_value(cfg, "nmpc.penalties.k_coax", 0.03))
-        _add_diff_penalty(idx_front_up, idx_front_down, k_coax)
-        _add_diff_penalty(idx_rear_up, idx_rear_down, k_coax)
+        # 1) 前后电机的同轴约束：同轴上下两桨尽量同速（防止只用其中一个）
+        k_coax_fr = float(get_value(cfg, "nmpc.penalties.k_coax_front_rear", 0.01))
+        _add_diff_penalty(idx_front_up, idx_front_down, k_coax_fr)
+        _add_diff_penalty(idx_rear_up, idx_rear_down, k_coax_fr)
 
-        # 2) 前后总推力尽量均衡： (front_up + front_down) - (rear_up + rear_down) ≈ 0
-        #    这会减少“前面两桨打满、后面两桨几乎不转”的情况，但仍允许产生必要的前后差分。
-        k_front_rear = float(get_value(cfg, "nmpc.penalties.k_front_rear", 0.02))
+        # 2) 前后电机总推力均衡： (front_up + front_down) - (rear_up + rear_down) ≈ 0
+        k_fr_balance = float(get_value(cfg, "nmpc.penalties.k_front_rear_balance", 0.005))
         _add_linear_combo_penalty(
             [idx_front_up, idx_front_down, idx_rear_up, idx_rear_down],
             [1.0, 1.0, -1.0, -1.0],
-            k_front_rear,
+            k_fr_balance,
         )
-
+        
+        # 3) 左右电机的同轴约束：同轴上下两桨尽量同速（防止只用其中一个）
+        k_coax_lr = float(get_value(cfg, "nmpc.penalties.k_coax_left_right", 0.01))
+        _add_diff_penalty(idx_left_up, idx_left_down, k_coax_lr)
+        _add_diff_penalty(idx_right_up, idx_right_down, k_coax_lr)
+        
+        # 4) 左右电机总推力均衡： (left_up + left_down) - (right_up + right_down) ≈ 0
+        k_lr_balance = float(get_value(cfg, "nmpc.penalties.k_left_right_balance", 0.005))
+        _add_linear_combo_penalty(
+            [idx_left_up, idx_left_down, idx_right_up, idx_right_down],
+            [1.0, 1.0, -1.0, -1.0],
+            k_lr_balance,
+        )
         # 舵机权重：希望机体水平/roll≈0 时舵机尽量回到各自中心（物理角≈pi/2）。
         # 之前“均值强、差动弱”的形式会让 (alpha-beta) 差动非常便宜，导致即使 roll≈0 也可能长期一高一低。
         # 改为分别惩罚 (alpha-center)^2 与 (beta-center)^2：
@@ -172,6 +190,15 @@ class NMPC_Controller:
             R[9, 9] = k_servo
             R[8, 9] = 0.0
             R[9, 8] = 0.0
+        
+        # 5) 舵机中位penalty：惩罚舵机偏离90°，减少左右电机对z轴推力的贡献
+        # 这个penalty让舵机在前进时尽量保持中位，只在横滚控制时才偏离
+        k_servo_neutral = float(get_value(cfg, "nmpc.penalties.k_servo_neutral", 0.0))
+        if k_servo_neutral > 0:
+            # 增加舵机的对角权重，使其倾向于保持在中位附近
+            # 注意：这是额外的penalty，叠加在R_diag[8:10]之上
+            R[8, 8] += k_servo_neutral
+            R[9, 9] += k_servo_neutral
 
         self.ocp.cost.W = scipy.linalg.block_diag(Q, R)
 
@@ -271,24 +298,40 @@ class NMPC_Controller:
 
         # 记录上一帧期望四元数，用于符号连续化（q 与 -q 表示同一姿态）
         self.last_desired_quat = np.array([1.0, 0.0, 0.0, 0.0])
+        self.yaw_flip_cooldown = 0.0  # 倒飞修正冷却时间
+        
+        # yaw连续化：记录上一帧的yaw_raw，用于unwrap
+        self.last_yaw_raw = 0.0
+        self.yaw_offset = 0.0  # 累积的2π偏移量
+        self.yaw_offset = 0.0  # 累积的2π偏移量
 
         # 调试开关：True 时打印参考信息（高频打印会明显拖慢仿真）
-        self.debug = False
+        self.debug = True
         
         # 构建编译OCP求解器
         self.acados_solver = AcadosOcpSolver(self.ocp, json_file = 'acados_ocp.json')
         print("NMPC Controller Init Done")
 
     def referen_state_transition(self, current_state, goal_state):
-        """分两步靠னர்目标: 先稳定偏航，再平移到目标。
+        """分两步靠近目标: 先稳定偏航，再平移到目标。
 
         目的：避免 goal_state 姿态恒为 yaw=0 导致偏航在换点/机动时发散，
         并在目标几乎正上方/脚下时冻结期望 yaw 防止抖动。
         """
 
-        def _yaw_from_quat(q):
+        def _yaw_from_quat(q, unwrap=True):
             qw, qx, qy, qz = q
-            return np.arctan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz))
+            yaw_raw = np.arctan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz))
+            if unwrap:
+                # Unwrap: 检测跳变并累积偏移
+                diff = yaw_raw - self.last_yaw_raw
+                if diff > np.pi:
+                    self.yaw_offset -= 2 * np.pi
+                elif diff < -np.pi:
+                    self.yaw_offset += 2 * np.pi
+                self.last_yaw_raw = yaw_raw
+                return yaw_raw + self.yaw_offset
+            return yaw_raw
 
         def _quat_from_yaw(yaw):
             half = 0.5 * yaw
@@ -314,15 +357,15 @@ class NMPC_Controller:
         v_ref = goal_state[7:10]
         v_norm = float(np.linalg.norm(v_ref[:2]))
         if planar_norm < yaw_deadband:
-            if v_norm > 1e-3:
-                desired_yaw = self.last_desired_yaw
-                if self.debug:
-                    print("  >> XY近距且有参考速度，冻结期望 yaw")
-            else:
-                desired_yaw_quat = _yaw_from_quat(goal_state[3:7])
-                desired_yaw = _unwrap_angle(self.last_desired_yaw, desired_yaw_quat)
-                if self.debug:
-                    print("  >> XY近距且无参考速度，使用目标向量期望 yaw: ", desired_yaw)
+            # if v_norm > 1e-3:
+            #     desired_yaw = self.last_desired_yaw
+            #     if self.debug:
+            #         print("  >> XY近距且有参考速度，冻结期望 yaw")
+            # else:
+            desired_yaw_quat = _yaw_from_quat(goal_state[3:7])
+            desired_yaw = _unwrap_angle(self.last_desired_yaw, desired_yaw_quat)
+            if self.debug:
+                print("  >> XY近距且无参考速度，使用目标向量期望 yaw: ", desired_yaw)
             self.last_desired_yaw = desired_yaw
         else:
             # 优先用参考速度方向作为期望 yaw（圆轨迹更自然，且避免“追点”带来的相位滞后）
@@ -339,24 +382,69 @@ class NMPC_Controller:
             self.last_desired_yaw = desired_yaw
 
         yaw_err = _wrap_pi(desired_yaw - current_yaw)
+        
+        # 倒飞修正：处理两种180°情况
+        # 1) 近距四元数符号抖动 (pos_err < 0.2m)
+        # 2) 远距反向指令 (pos_err > 0.5m 且速度参考也反向)
+        if abs(yaw_err) > np.deg2rad(178.0) and self.yaw_flip_cooldown <= 0:
+            pos_err = float(np.linalg.norm(pos_goal[:2] - pos_cur[:2]))
+            
+            # 情况1：近距修正（原逻辑，防止四元数符号翻转抖动）
+            should_correct = pos_err < 0.2
+            correction_reason = "近距抖动"
+            
+            # 情况2：远距反向指令检测
+            if not should_correct and pos_err > 0.5:
+                # 额外验证：参考速度方向也与当前yaw相反（避免误判圆轨迹某些相位）
+                v_ref_xy = goal_state[7:9]
+                v_ref_norm = float(np.linalg.norm(v_ref_xy))
+                if v_ref_norm > 0.1:  # 有明确速度参考
+                    v_yaw = np.arctan2(v_ref_xy[1], v_ref_xy[0])
+                    v_yaw_err = abs(_wrap_pi(v_yaw - current_yaw))
+                    if v_yaw_err > np.deg2rad(160.0):  # 速度方向也接近反向
+                        should_correct = True
+                        correction_reason = f"远距反向 v_err={np.rad2deg(v_yaw_err):.1f}°"
+            
+            # 执行修正
+            if should_correct:
+                desired_yaw = _wrap_pi(desired_yaw + np.pi)
+                yaw_err = _wrap_pi(desired_yaw - current_yaw)
+
+        # 提前判断是否为动态参考（圆轨迹等）
+        v_ref_xy_norm = float(np.linalg.norm(goal_state[7:9]))
+        is_dynamic_ref = v_ref_xy_norm > 1e-3
+        
+        # 倒飞修正：只在静态目标时启用（动态轨迹禁用，避免转圈）
+        # 条件：1) 非动态参考 2) yaw误差接近180° 3) 冷却时间已过
+        if (not is_dynamic_ref) and abs(yaw_err) > np.deg2rad(178.0) and self.yaw_flip_cooldown <= 0:
+            pos_err = float(np.linalg.norm(pos_goal[:2] - pos_cur[:2]))
+            
+            # 只在静止目标时修正（位置接近且当前速度低）
+            v_cur_norm = float(np.linalg.norm(current_state[7:9]))
+            if pos_err < 0.5 and v_cur_norm < 0.15:  # 合并近距和中距
+                desired_yaw = _wrap_pi(desired_yaw + np.pi)
+                yaw_err = _wrap_pi(desired_yaw - current_yaw)
+                self.yaw_flip_cooldown = 3.0  # 3秒冷却
+                if self.debug:
+                    print(f"  >> 倒飞修正触发: 静止反向 (pos={pos_err:.3f}m, v={v_cur_norm:.3f}m/s)")
+        
+        # 更新冷却计时
+        if self.yaw_flip_cooldown > 0:
+            self.yaw_flip_cooldown -= 0.01  # 假设dt=0.01s
+        
         yaw_threshold = np.deg2rad(10.0)
         yaw_freeze_max = np.deg2rad(45.0)
 
         new_goal = goal_state.copy()
         desired_quat = _quat_from_yaw(desired_yaw)
 
-        # 四元数符号连续化：避免从 [0,0,0,1] 突然跳到 [0,0,0,-1] 这类“等价但数值不连续”的翻转
+        # 四元数符号连续化：避免从 [0,0,0,1] 突然跳到 [0,0,0,-1] 这类"等价但数值不连续"的翻转
         if float(np.dot(desired_quat, self.last_desired_quat)) < 0.0:
             desired_quat = -desired_quat
         self.last_desired_quat = desired_quat
 
         new_goal[3:7] = desired_quat
 
-        # 动态参考（例如圆轨迹）时不要用 yaw_err 去“冻结/缩小”平移目标。
-        # 否则会出现：某些相位 yaw 误差稍大 → alpha 很小 → 平移几乎停滞；
-        # 等 yaw 跟上后再突然追赶，视觉上像“半圈停住再继续”。
-        v_ref_xy_norm = float(np.linalg.norm(goal_state[7:9]))
-        is_dynamic_ref = v_ref_xy_norm > 1e-3
 
         # 偏航误差大时降低平移意图（仅用于静态“追点”目标）
         yaw_abs = abs(yaw_err)
@@ -367,10 +455,11 @@ class NMPC_Controller:
                 alpha = 1.0 - (yaw_abs - yaw_threshold) / (yaw_freeze_max - yaw_threshold)
             new_goal[0:3] = pos_cur + alpha * (pos_goal - pos_cur)
             new_goal[7:10] = alpha * new_goal[7:10]
-        new_goal[10:13] = 0.0
+        new_goal[10:12] = 0.0  # 只清零 wx, wy，保留 wz (yaw_rate前馈)
 
         if self.debug:
-            print(f"New Goal Position: {new_goal[0:3]}", f"  Current Position: {pos_cur}")
+            # print(f"New Goal Position: {new_goal[0:3]}", f"  Current Position: {pos_cur}")
+            print(f"  Current Yaw: {current_yaw:.3f} rad, Desired Yaw: {desired_yaw:.3f} rad, Yaw Error: {yaw_err:.3f} rad")
         return new_goal
 
     # 状态空间位点控制
@@ -469,7 +558,7 @@ class NMPC_Controller:
 
     # NMPC位置控制
     # goal_pos: 目标三维位置[x y z]
-    def nmpc_position_control(self, current_state, goal_pos, disturbance=None, goal_vel=None):
+    def nmpc_position_control(self, current_state, goal_pos, disturbance=None, goal_vel=None, goal_quat=None, goal_yaw_rate=None, actual_disturbance=None):
         """
         位置控制
         
@@ -478,6 +567,9 @@ class NMPC_Controller:
             goal_pos: 目标位置 [x,y,z]
             disturbance: 扰动估计 dict {'force': [fx,fy,fz], 'torque': [mx,my,mz]}
                         可选，直接用于MPC模型中
+            goal_vel: 目标速度 [vx,vy,vz] (可选)
+            goal_quat: 目标四元数 [qw,qx,qy,qz] (可选)
+            goal_yaw_rate: 目标偏航角速度 wz (弧度/秒, 可选)
         
         Returns:
             _dt: 求解时间
@@ -490,11 +582,19 @@ class NMPC_Controller:
         # goal_state: [x,y,z,qw,qx,qy,qz,vx,vy,vz,wx,wy,wz]
         # 重要：对圆轨迹/方轨迹这类“动态参考”，给 vx/vy/vz 前馈能避免 referen_state_transition()
         # 把它误判成“静态追点”而在某些相位抑制平移（表现为只跑一小段就停）。
+        # 使用传入的目标四元数（如果提供），否则默认为[1,0,0,0]
+        if goal_quat is None:
+            goal_quat = np.array([1.0, 0.0, 0.0, 0.0])
+        
+        # 角速度前馈：yaw_rate对应wz，wx和wy保持为0
+        if goal_yaw_rate is None:
+            goal_yaw_rate = 0.0
+        
         goal_state = np.array([
             goal_pos[0], goal_pos[1], goal_pos[2],
-            1.0, 0.0, 0.0, 0.0,
+            goal_quat[0], goal_quat[1], goal_quat[2], goal_quat[3],
             goal_vel[0], goal_vel[1], goal_vel[2],
-            0.0, 0.0, 0.0,
+            0.0, 0.0, float(goal_yaw_rate),  # wx, wy, wz - 使用yaw_rate前馈
         ])
         
         # 将扰动字典转换为参数数组 [fx, fy, fz, mx, my, mz]
@@ -516,13 +616,21 @@ class NMPC_Controller:
             'solve_time': _dt
         }
         
-        # 记录扰动估计（如果有）
+        # 记录ESO扰动估计（如果有）
         if disturbance is not None:
             log_entry['dist_force'] = disturbance['force'].copy()
             log_entry['dist_torque'] = disturbance['torque'].copy()
         else:
             log_entry['dist_force'] = np.zeros(3)
             log_entry['dist_torque'] = np.zeros(3)
+        
+        # 记录实际扰动（如果有）
+        if actual_disturbance is not None:
+            log_entry['actual_dist_force'] = actual_disturbance['force'].copy()
+            log_entry['actual_dist_torque'] = actual_disturbance['torque'].copy()
+        else:
+            log_entry['actual_dist_force'] = np.zeros(3)
+            log_entry['actual_dist_torque'] = np.zeros(3)
         
         self.data_log.append(log_entry)
         
@@ -545,7 +653,9 @@ class NMPC_Controller:
                      'u1', 'u2', 'u3', 'u4', 'u5', 'u6', 'u7', 'u8', 'u_alpha', 'u_beta',
                      'solve_time',
                      'dist_fx', 'dist_fy', 'dist_fz',
-                     'dist_mx', 'dist_my', 'dist_mz']
+                     'dist_mx', 'dist_my', 'dist_mz',
+                     'actual_dist_fx', 'actual_dist_fy', 'actual_dist_fz',
+                     'actual_dist_mx', 'actual_dist_my', 'actual_dist_mz']
             writer.writerow(header)
             
             # 写入数据
@@ -556,9 +666,12 @@ class NMPC_Controller:
                 row.extend(data['goal'])
                 row.extend(data['control'])
                 row.append(data['solve_time'])
-                # 添加扰动估计
+                # 添加ESO扰动估计
                 row.extend(data['dist_force'])
                 row.extend(data['dist_torque'])
+                # 添加实际扰动
+                row.extend(data['actual_dist_force'])
+                row.extend(data['actual_dist_torque'])
                 writer.writerow(row)
         
         print(f"✓ 数据已保存到: {filename} ({len(self.data_log)} 条记录)")

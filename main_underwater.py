@@ -7,6 +7,7 @@ from os.path import abspath, dirname, join
 from nmpc_controller_underwater import NMPC_Controller
 from trajectory_generator import TrajectoryGenerator
 from eso_observer import ESO_Observer
+from disturbance_generator import DisturbanceGenerator, DisturbanceScenarios
 
 from config_loader import get_mode_config, get_value
 
@@ -108,6 +109,10 @@ def rotation_matrix(q0, q1, q2, q3):
 log_count = 0
 eso_enable = True  # 默认启用ESO（可通过命令行参数修改）
 
+# 扰动生成器（可选，用于测试控制器鲁棒性）
+disturbance_gen = None
+disturbance_enable = False
+
 # NMPC/ESO 以 control_dt 更新，其余仿真步保持上一控制量
 last_nmpc_time = -1.0
 held_control = np.zeros(10)
@@ -147,18 +152,35 @@ def control_callback(m, d):
     if do_update:
         last_nmpc_time = float(d.time)
 
-        # 从轨迹生成器获取目标位置 + 速度前馈
-        goal_position, goal_velocity = trajectory_gen.get_reference_state(d.time)
+        # 从轨迹生成器获取目标位置 + 速度前馈 + yaw + yaw_rate
+        goal_position, goal_velocity, goal_yaw, goal_yaw_rate = trajectory_gen.get_reference_state(d.time)
+        
+        # 将yaw转换为四元数
+        def yaw_to_quat(yaw):
+            half_yaw = yaw / 2.0
+            return np.array([np.cos(half_yaw), 0.0, 0.0, np.sin(half_yaw)])
+        
+        goal_quat = yaw_to_quat(goal_yaw)
 
-        # 获取扰动估计（可选用于前馈补偿）
+        # 获取实际施加的扰动（用于记录）
+        global disturbance_gen, disturbance_enable
+        if disturbance_enable and disturbance_gen is not None:
+            actual_dist = disturbance_gen.get_disturbance(d.time)
+            actual_disturbance = {'force': actual_dist['force'].copy(), 'torque': actual_dist['torque'].copy()}
+        else:
+            actual_disturbance = None
+
+        # 获取ESO扰动估计（可选用于前馈补偿）
         if eso_enable:
             dist_f, dist_m = eso.update(state_obs, last_control_for_eso, quat)
-            disturbance = {'force': dist_f, 'torque': dist_m}
+            eso_disturbance = {'force': dist_f, 'torque': dist_m}
         else:
-            disturbance = None
+            eso_disturbance = None
 
         _solve_dt, new_control = controller.nmpc_position_control(
-            current_state, goal_position, disturbance, goal_vel=goal_velocity
+            current_state, goal_position, eso_disturbance, 
+            goal_vel=goal_velocity, goal_quat=goal_quat, goal_yaw_rate=goal_yaw_rate,
+            actual_disturbance=actual_disturbance
         )
         held_control = new_control.copy()
         last_control_for_eso = held_control.copy()
@@ -179,6 +201,15 @@ def control_callback(m, d):
 
     # 测试用例：全部电机关闭
     # motor_speeds = np.zeros_like(motor_speeds)
+    
+    # === 应用外部扰动（如果启用）===
+    if disturbance_enable and disturbance_gen is not None:
+        dist = disturbance_gen.get_disturbance(d.time)
+        # 将扰动力和力矩直接施加到无人机
+        # force: [fx, fy, fz] in world frame (N)
+        # torque: [mx, my, mz] in body frame (Nm)
+        d.xfrc_applied[1, :3] = dist['force']   # body 1 是无人机主体
+        d.xfrc_applied[1, 3:] = dist['torque']
     
     # 应用电机控制
     for i in range(8):
@@ -215,7 +246,7 @@ def control_callback(m, d):
         log_count = 0
         # 输出扰动估计（仅在ESO启用时）
         if eso_enable:
-            dist = disturbance
+            dist = eso_disturbance
             # print(f"扰动力: {dist['force']}, 扰动力矩: {dist['torque']}")
 
 if __name__ == '__main__':
@@ -246,16 +277,38 @@ if __name__ == '__main__':
                         default=True, help='启用ESO扰动观测器（默认启用）')
     parser.add_argument('--no-eso', dest='eso_enable', action='store_false',
                         help='禁用ESO扰动观测器')
+    parser.add_argument('--disturbance', type=str, default=None,
+                        choices=['mild', 'moderate', 'severe', 'random'],
+                        help='启用外部扰动场景 (mild/moderate/severe/random)')
     
     args = parser.parse_args()
     
     # 设置全局ESO开关
     eso_enable = args.eso_enable
     
+    # 设置扰动生成器（修改全局变量）
+    if args.disturbance is not None:
+        disturbance_enable = True
+        disturbance_gen = DisturbanceGenerator(seed=42)
+        
+        if args.disturbance == 'mild':
+            DisturbanceScenarios.mild_disturbance(disturbance_gen)
+        elif args.disturbance == 'moderate':
+            DisturbanceScenarios.moderate_disturbance(disturbance_gen)
+        elif args.disturbance == 'severe':
+            DisturbanceScenarios.severe_disturbance(disturbance_gen)
+        elif args.disturbance == 'random':
+            DisturbanceScenarios.random_disturbance(disturbance_gen, severity='moderate')
+        
+        disturbance_gen.print_summary()
+    else:
+        disturbance_enable = False
+    
     print("="*80)
     print("🚁 八旋翼NMPC控制器 - 轨迹跟踪模式")
     print("="*80)
     print(f"\n【ESO扰动观测器】: {'✅ 启用' if eso_enable else '❌ 禁用'}")
+    print(f"【外部扰动】: {'✅ 启用 (' + args.disturbance + ')' if disturbance_enable else '❌ 禁用'}")
     print("\n【选择飞行模式】")
     print("  1 - 悬停模式 (Hover at 1.0m)")
     print("  2 - 画圆模式 (Circle)")

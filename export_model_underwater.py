@@ -133,6 +133,9 @@ def export_model_underwater(
     _thrust_accx_w = (R00*fx_b + R01*fy_b + R02*fz_b) / mass
     _thrust_accy_w = (R10*fx_b + R11*fy_b + R12*fz_b) / mass
     _thrust_accz_w = (R20*fx_b + R21*fy_b + R22*fz_b) / mass
+    # _thrust_accx_w = fx_b / mass  # 直接使用机体坐标系的前后推力分量作为世界坐标系的前后推力分量
+    # _thrust_accy_w = 0  # 侧向推力分量忽略不计
+    # _thrust_accz_w = fz_b / mass  # 直接使用机体坐标系的垂直推力分量作为世界坐标系的垂直推力分量
 
     # _thrust_acc_b = Ct*(w1**2 + w2**2 + w3**2 + w4**2 + w5**2 + w6**2 + w7**2 + w8**2) / mass  # 机体坐标系中推力引起的加速度
     # # 将机体坐标系推力加速度转换为世界坐标系推力加速度
@@ -153,8 +156,7 @@ def export_model_underwater(
     
     # 机体角速度求导
     # 计算三轴扭矩输入 (控制力矩)
-    mx = l*Ct*((w2**2 + w6**2)*SX.cos(alpha_eff) - (w4**2 + w8**2)*SX.cos(beta_eff)) \
-             + m2*SX.sin(alpha_eff) + m6*SX.sin(alpha_eff) + m4*SX.sin(beta_eff) + m8*SX.sin(beta_eff)
+    mx = l * (f2 + f6 - f4 - f8)  # 横滚力矩：左侧电机向上推，右侧电机向下推
     my = l*Ct*( -w1**2 - w5**2 + w3**2 + w7**2 ) 
     mz_lr = -l*((f2 + f6)*SX.sin(alpha_eff) - (f4 + f8)*SX.sin(beta_eff)) \
         + (m2 + m6)*SX.cos(alpha_eff) \

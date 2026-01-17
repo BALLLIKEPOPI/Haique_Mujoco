@@ -22,7 +22,7 @@ class TrajectoryGenerator:
         
         # 方形轨迹参数
         self.square_center = np.array([0.0, 0.0, 1.0])
-        self.square_size = 3  # 边长3m
+        self.square_size = 2  # 边长3m
         self.square_period = 25.0  # 25秒一圈（每条边6.25秒）
         
         # 连续爬升参数
@@ -111,45 +111,59 @@ class TrajectoryGenerator:
         return final_pos
 
     def get_reference_state(self, time):
-        """根据当前时间和模式生成参考状态（位置+速度）。
+        """根据当前时间和模式生成参考状态（位置+速度+yaw+yaw_rate）。
 
         返回:
-            pos: np.ndarray shape (3,)
-            vel: np.ndarray shape (3,)
+            pos: np.ndarray shape (3,) - 位置
+            vel: np.ndarray shape (3,) - 速度
+            yaw: float - 偏航角（弧度）
+            yaw_rate: float - 偏航角速度（弧度/秒）
         """
         self.current_time = time
 
-        # 预悬停：非 hover 模式先保持悬停参考（位置+速度）
+        # 预悬停：非 hover 模式先保持悬停参考（位置+速度+yaw）
         if (self.mode != 'hover') and (self.current_time < self.motion_start_time):
+            print("预悬停阶段，保持悬停参考状态")
             final_pos = self.hover_position.copy()
             final_vel = np.zeros(3)
             self.last_position = final_pos.copy()
-            return final_pos, final_vel
+            return final_pos, final_vel, 0.0, 0.0
 
         if self.mode == 'hover':
             target_pos = self._hover_trajectory()
             target_vel = np.zeros(3)
+            target_yaw = 0.0
+            target_yaw_rate = 0.0
         elif self.mode == 'circle':
-            target_pos, target_vel = self._circle_trajectory_state()
+            target_pos, target_vel, target_yaw, target_yaw_rate = self._circle_trajectory_state()
         elif self.mode == 'square':
-            target_pos, target_vel = self._square_trajectory_state()
+            target_pos, target_vel, target_yaw, target_yaw_rate = self._square_trajectory_state()
         elif self.mode == 'climb':
             target_pos, target_vel = self._climb_trajectory_state()
+            target_yaw = 0.0
+            target_yaw_rate = 0.0
         elif self.mode == 'forward':
             target_pos, target_vel = self._forward_trajectory_state()
+            target_yaw = 0.0
+            target_yaw_rate = 0.0
         else:
             target_pos = self.hover_position.copy()
             target_vel = np.zeros(3)
+            target_yaw = 0.0
+            target_yaw_rate = 0.0
 
-        # 过渡期位置用插值；速度前馈在过渡期置零，避免目标速度跳变
+        # 过渡期位置用插值；速度和角速度前馈在过渡期置零，避免目标跳变
         final_pos = self._apply_transition(target_pos)
         if self._elapsed_motion_time() < self.transition_duration:
+            print("过渡阶段，速度和角速度置零")
             final_vel = np.zeros(3)
+            final_yaw_rate = 0.0
         else:
             final_vel = target_vel
+            final_yaw_rate = target_yaw_rate
 
         self.last_position = final_pos.copy()
-        return final_pos, final_vel
+        return final_pos, final_vel, target_yaw, final_yaw_rate
     
     def _apply_transition(self, target_pos):
         """应用平滑过渡从当前位置到目标轨迹"""
@@ -222,7 +236,7 @@ class TrajectoryGenerator:
         return pos, vel
 
     def _circle_trajectory_state(self):
-        """圆形轨迹（位置+解析速度）"""
+        """圆形轨迹（位置+解析速度+yaw朝向运动方向）"""
         t = self._elapsed_motion_time()
 
         if t < self.transition_duration:
@@ -241,15 +255,22 @@ class TrajectoryGenerator:
         vy =  self.circle_radius * omega * np.cos(theta)
         vz = 0.0
 
-        return np.array([x, y, z]), np.array([vx, vy, vz])
+        # yaw朝向运动方向（速度方向）
+        yaw = np.arctan2(vy, vx)
+        # yaw_rate = omega（匀速圆周运动的角速度）
+        yaw_rate = omega
+
+        return np.array([x, y, z]), np.array([vx, vy, vz]), yaw, yaw_rate
 
     def _square_trajectory_state(self):
-        """方形轨迹（位置+近似速度）。"""
-        # 为了保持简单：过渡期速度置零；过渡完成后按分段常速度给前馈。
+        """方形轨迹（位置+近似速度+yaw朝向运动方向）。
+        
+        在转角处添加过渡：先停止前进并旋转到目标yaw，再继续前进。
+        """
         t = self._elapsed_motion_time()
         pos = self._square_trajectory()
         if t < self.transition_duration:
-            return pos, np.zeros(3)
+            return pos, np.zeros(3), 0.0, 0.0
 
         half_size = self.square_size / 2.0
         t_actual = t - self.transition_duration
@@ -258,17 +279,55 @@ class TrajectoryGenerator:
 
         t_norm = (t_actual % self.square_period)
         seg = int(t_norm // seg_time)
+        t_in_seg = t_norm - seg * seg_time  # 当前段内的时间
+        
+        # 转角过渡时间：在每段结尾停下来旋转
+        corner_transition_time = 1.0  # 转角旋转时间（秒）
+        yaw_rotation_speed = np.pi / 2.0 / corner_transition_time  # 90°旋转速度
+        
+        # 定义每段的yaw（连续递增，避免跳变）
+        yaw_segments = [np.pi / 2.0, np.pi, 3 * np.pi / 2.0, 2 * np.pi]
+        current_yaw = yaw_segments[seg]
+        next_yaw = yaw_segments[(seg + 1) % 4]
+        
+        # 检测是否在转角过渡期
+        time_until_corner = seg_time - t_in_seg
+        is_in_corner_transition = time_until_corner < corner_transition_time
+        
+        if is_in_corner_transition:
+            # 转角过渡阶段：速度置零，旋转yaw
+            vel = np.zeros(3)
+            
+            # 计算转角进度 [0, 1]
+            corner_progress = (corner_transition_time - time_until_corner) / corner_transition_time
+            
+            # 平滑插值yaw（使用ease-in-out）
+            smooth_progress = 3 * corner_progress**2 - 2 * corner_progress**3
+            yaw = current_yaw + smooth_progress * (next_yaw - current_yaw)
+            yaw_rate = yaw_rotation_speed
+        else:
+            # 直线段：正常前进
+            # 加速期：段开始时
+            accel_duration = min(0.5, (seg_time - corner_transition_time) * 0.3)
+            if t_in_seg < accel_duration:
+                speed_ratio = t_in_seg / accel_duration
+            else:
+                speed_ratio = 1.0
+            
+            # 根据当前段设置速度方向
+            if seg == 0:      # 右边：y 递增
+                vel = np.array([0.0, vmag * speed_ratio, 0.0])
+            elif seg == 1:    # 上边：x 递减
+                vel = np.array([-vmag * speed_ratio, 0.0, 0.0])
+            elif seg == 2:    # 左边：y 递减
+                vel = np.array([0.0, -vmag * speed_ratio, 0.0])
+            else:             # 下边：x 递增
+                vel = np.array([vmag * speed_ratio, 0.0, 0.0])
+            
+            yaw = current_yaw
+            yaw_rate = 0.0
 
-        if seg == 0:      # 右边：y 递增
-            vel = np.array([0.0, vmag, 0.0])
-        elif seg == 1:    # 上边：x 递减
-            vel = np.array([-vmag, 0.0, 0.0])
-        elif seg == 2:    # 左边：y 递减
-            vel = np.array([0.0, -vmag, 0.0])
-        else:             # 下边：x 递增
-            vel = np.array([vmag, 0.0, 0.0])
-
-        return pos, vel
+        return pos, vel, yaw, yaw_rate
 
     def _climb_trajectory_state(self):
         """爬升轨迹（位置+速度）"""
