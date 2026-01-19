@@ -35,9 +35,9 @@
 # model
 MODEL_SRC=
 
-MODEL_SRC+= haique_model/haique_expl_ode_fun.c
-MODEL_SRC+= haique_model/haique_expl_vde_forw.c
-MODEL_SRC+= haique_model/haique_expl_vde_adj.c
+MODEL_SRC+= crazyflie_model/crazyflie_expl_ode_fun.c
+MODEL_SRC+= crazyflie_model/crazyflie_expl_vde_forw.c
+MODEL_SRC+= crazyflie_model/crazyflie_expl_vde_adj.c
 
 MODEL_OBJ := $(MODEL_SRC:.c=.o)
 # optimal control problem - mostly CasADi exports
@@ -45,19 +45,19 @@ OCP_SRC=
 
 
 
-OCP_SRC+= acados_solver_haique.c
+OCP_SRC+= acados_solver_crazyflie.c
 
 OCP_OBJ := $(OCP_SRC:.c=.o)
 # for sim solver
-SIM_SRC= acados_sim_solver_haique.c
+SIM_SRC= acados_sim_solver_crazyflie.c
 SIM_OBJ := $(SIM_SRC:.c=.o)
 
 # for target example_sim
-EX_SIM_SRC= main_sim_haique.c
+EX_SIM_SRC= main_sim_crazyflie.c
 EX_SIM_OBJ := $(EX_SIM_SRC:.c=.o)
 EX_SIM_EXE := $(EX_SIM_SRC:.c=)
 # for target example
-EX_SRC= main_haique.c
+EX_SRC= main_crazyflie.c
 EX_OBJ := $(EX_SRC:.c=.o)
 EX_EXE := $(EX_SRC:.c=)
 
@@ -99,8 +99,8 @@ LDLIBS+= -lm
 LDLIBS+= 
 
 # libraries
-LIBACADOS_SOLVER=libacados_solver_haique.so
-LIBACADOS_OCP_SOLVER=libacados_ocp_solver_haique.so
+LIBACADOS_SOLVER=libacados_solver_crazyflie.so
+LIBACADOS_OCP_SOLVER=libacados_ocp_solver_crazyflie.so
 LIBACADOS_SIM_SOLVER=lib$(SIM_SRC:.c=.so)
 
 # virtual targets
@@ -151,7 +151,7 @@ ocp_cython: ocp_cython_o
 	-o acados_ocp_solver_pyx.so \
 	-Wl,-rpath=$(LIB_PATH) \
 	acados_ocp_solver_pyx.o \
-	$(abspath .)/libacados_ocp_solver_haique.so \
+	$(abspath .)/libacados_ocp_solver_crazyflie.so \
 	$(LDFLAGS) $(LDLIBS)
 
 
@@ -180,7 +180,7 @@ sim_cython: sim_cython_o
 	-o acados_sim_solver_pyx.so \
 	-Wl,-rpath=$(LIB_PATH) \
 	acados_sim_solver_pyx.o \
-	$(abspath .)/libacados_sim_solver_haique.so \
+	$(abspath .)/libacados_sim_solver_crazyflie.so \
 	$(LDFLAGS) $(LDLIBS)
 
 clean:
@@ -192,13 +192,13 @@ clean_ocp_shared_lib:
 	$(RM) $(OCP_OBJ)
 
 clean_ocp_cython:
-	$(RM) libacados_ocp_solver_haique.so
-	$(RM) acados_solver_haique.o
+	$(RM) libacados_ocp_solver_crazyflie.so
+	$(RM) acados_solver_crazyflie.o
 	$(RM) acados_ocp_solver_pyx.so
 	$(RM) acados_ocp_solver_pyx.o
 
 clean_sim_cython:
-	$(RM) libacados_sim_solver_haique.so
-	$(RM) acados_sim_solver_haique.o
+	$(RM) libacados_sim_solver_crazyflie.so
+	$(RM) acados_sim_solver_crazyflie.o
 	$(RM) acados_sim_solver_pyx.so
 	$(RM) acados_sim_solver_pyx.o

@@ -105,7 +105,7 @@ def control_callback(m, d):
     current_state = np.concatenate([pos, quat, vel, omega])
 
     # 从轨迹生成器获取目标位置 + 目标速度（用于前馈/减少相位滞后）
-    goal_position, goal_velocity = trajectory_gen.get_reference_state(d.time)
+    goal_position, goal_velocity, goal_yaw, goal_yaw_rate = trajectory_gen.get_reference_state(d.time)
 
     # NMPC Update（获取扰动补偿可选）
     k_yaw = float(get_value(CFG, "model.k_yaw", 0.8))
@@ -119,7 +119,10 @@ def control_callback(m, d):
     else:
         disturbance = None
     
-    _dt, _control = controller.nmpc_position_control(current_state, goal_position, goal_velocity, disturbance)
+    # 将目标yaw角转换为四元数
+    goal_quat = np.array([np.cos(goal_yaw/2), 0, 0, np.sin(goal_yaw/2)])  # [qw, qx, qy, qz]
+    
+    _dt, _control = controller.nmpc_position_control(current_state, goal_position, goal_velocity, goal_quat, disturbance)
     last_control_krpm = _control.copy()
     # 计算实际的8个电机转速
     # 注意：这里的 yaw_bias 混控必须与 MPC 模型保持一致。

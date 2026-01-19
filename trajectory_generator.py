@@ -155,7 +155,10 @@ class TrajectoryGenerator:
         # 过渡期位置用插值；速度和角速度前馈在过渡期置零，避免目标跳变
         final_pos = self._apply_transition(target_pos)
         if self._elapsed_motion_time() < self.transition_duration:
-            print("过渡阶段，速度和角速度置零")
+            # 调试：降低打印频率
+            elapsed = self._elapsed_motion_time()
+            if int(elapsed * 200) % 200 == 0:
+                print(f"过渡阶段 {elapsed:.1f}/{self.transition_duration}s")
             final_vel = np.zeros(3)
             final_yaw_rate = 0.0
         else:
