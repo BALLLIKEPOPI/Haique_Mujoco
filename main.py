@@ -153,6 +153,16 @@ def control_callback(m, d):
     log_count += 1
     if log_count >= 50:
         log_count = 0
+        # 计算当前yaw角（从四元数）
+        current_yaw = np.arctan2(2*(quat[0]*quat[3] + quat[1]*quat[2]), 
+                                 1 - 2*(quat[2]**2 + quat[3]**2))
+        
+        # 打印yaw信息
+        print(f"t={d.time:6.2f}s | "
+              f"目标yaw={np.degrees(goal_yaw):7.1f}° | "
+              f"当前yaw={np.degrees(current_yaw):7.1f}° | "
+              f"目标yaw_rate={np.degrees(goal_yaw_rate):6.1f}°/s")
+        
         # 输出扰动估计（仅在ESO启用时）
         if eso_enable:
             dist = disturbance

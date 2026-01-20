@@ -258,8 +258,9 @@ class TrajectoryGenerator:
         vy =  self.circle_radius * omega * np.cos(theta)
         vz = 0.0
 
-        # yaw朝向运动方向（速度方向）
-        yaw = np.arctan2(vy, vx)
+        # yaw连续增长，避免arctan2的±180°跳变
+        # 起始yaw=π/2（机头朝+Y），随theta连续旋转
+        yaw = np.pi/2 + theta
         # yaw_rate = omega（匀速圆周运动的角速度）
         yaw_rate = omega
 
@@ -289,9 +290,14 @@ class TrajectoryGenerator:
         yaw_rotation_speed = np.pi / 2.0 / corner_transition_time  # 90°旋转速度
         
         # 定义每段的yaw（连续递增，避免跳变）
-        yaw_segments = [np.pi / 2.0, np.pi, 3 * np.pi / 2.0, 2 * np.pi]
-        current_yaw = yaw_segments[seg]
-        next_yaw = yaw_segments[(seg + 1) % 4]
+        # 定义每段的yaw（连续递增，避免跳变）
+        # 计算当前完成了几圈（基于总时间）
+        total_elapsed = self._elapsed_motion_time() - self.transition_duration
+        lap_count = int(total_elapsed // self.square_period)  # 完成的圈数
+        base_yaw = lap_count * 2 * np.pi  # 每圈增加360°
+        yaw_offsets = [np.pi / 2.0, np.pi, 3 * np.pi / 2.0, 2 * np.pi]
+        current_yaw = base_yaw + yaw_offsets[seg]
+        next_yaw = base_yaw + yaw_offsets[(seg + 1) % 4] + (2 * np.pi if seg == 3 else 0)
         
         # 检测是否在转角过渡期
         time_until_corner = seg_time - t_in_seg
