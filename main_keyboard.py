@@ -8,12 +8,12 @@ import numpy as np
 import time
 import argparse
 from os.path import abspath, dirname, join
-from keyboard_controller import KeyboardController
+from control.keyboard_controller import KeyboardController
 from controller_state_machine import ControllerStateMachine
-from nmpc_controller import NMPC_Controller as AerialController
-from nmpc_controller_underwater import NMPC_Controller as UnderwaterController
-from config_loader import get_mode_config, get_value
-from keyboard_control_plotter import KeyboardControlLogger, KeyboardControlPlotter
+from control.nmpc_controller import NMPC_Controller as AerialController
+from control.nmpc_controller_underwater import NMPC_Controller as UnderwaterController
+from model.config_loader import get_mode_config, get_value
+from visualization.keyboard_control_plotter import KeyboardControlLogger, KeyboardControlPlotter
 
 CONFIG_PATH = join(dirname(abspath(__file__)), "config.yaml")
 

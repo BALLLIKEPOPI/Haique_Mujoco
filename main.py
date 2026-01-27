@@ -8,7 +8,7 @@ from nmpc_controller import NMPC_Controller
 from trajectory_generator import TrajectoryGenerator
 from eso_observer import ESO_Observer
 
-from config_loader import get_mode_config, get_value
+from model.config_loader import get_mode_config, get_value
 
 
 CONFIG_PATH = join(dirname(abspath(__file__)), "config.yaml")
@@ -294,8 +294,8 @@ if __name__ == '__main__':
     finally:
         # 保存数据
         print("\n正在保存飞行数据...")
-        controller.save_data('./log/nmpc_data.csv')
-        print("✓ NMPC数据已保存到 ./log/nmpc_data.csv")
+        controller.save_data('./log/csv/nmpc_data.csv')
+        print("✓ NMPC数据已保存到 ./log/csv/nmpc_data.csv")
         
         if eso_enable:
             eso.save_disturbance_log('./log/eso_disturbance_log.csv')

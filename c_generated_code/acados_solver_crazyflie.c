@@ -725,10 +725,10 @@ void crazyflie_acados_setup_nlp_in(crazyflie_solver_capsule* capsule, const int 
     double* lubu = calloc(2*NBU, sizeof(double));
     double* lbu = lubu;
     double* ubu = lubu + NBU;
-    ubu[0] = 22;
-    ubu[1] = 22;
-    ubu[2] = 22;
-    ubu[3] = 22;
+    ubu[0] = 10.05;
+    ubu[1] = 10.05;
+    ubu[2] = 10.05;
+    ubu[3] = 10.05;
     lbu[4] = -0.8;
     ubu[4] = 0.8;
 

@@ -11,9 +11,9 @@ import time
 from scipy.spatial.transform import Rotation as R
 from os.path import dirname, join, abspath
 
-from nmpc_controller import NMPC_Controller
+from control.nmpc_controller import NMPC_Controller
 from trajectory_generator import TrajectoryGenerator
-from config_loader import get_mode_config, get_value
+from model.config_loader import get_mode_config, get_value
 
 np.set_printoptions(suppress=True, precision=4)
 

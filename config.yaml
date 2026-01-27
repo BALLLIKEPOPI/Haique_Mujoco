@@ -108,7 +108,7 @@
     "nmpc": {
       "Tf": 0.6,
       "N": 30,
-      "max_speed": 22.0,
+      "max_speed": 10.05,
       "W_e_scale": 10.0,
       "Q_diag": [
         180.0,

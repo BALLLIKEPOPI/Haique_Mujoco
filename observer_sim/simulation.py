@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 import pandas as pd
 from forward_dynamics import ForwardDynamics
-from eso_observer import ESO_Observer
+from observer.eso_observer import ESO_Observer
 
 
 class SimulationRunner:
