@@ -489,14 +489,14 @@ void crazyflie_acados_setup_nlp_in(crazyflie_solver_capsule* capsule, const int 
     // change only the non-zero elements:
     W_0[0+(NY0) * 0] = 180;
     W_0[1+(NY0) * 1] = 180;
-    W_0[2+(NY0) * 2] = 260;
+    W_0[2+(NY0) * 2] = 400;
     W_0[3+(NY0) * 3] = 60;
     W_0[4+(NY0) * 4] = 60;
     W_0[5+(NY0) * 5] = 80;
     W_0[6+(NY0) * 6] = 80;
     W_0[7+(NY0) * 7] = 80;
     W_0[8+(NY0) * 8] = 80;
-    W_0[9+(NY0) * 9] = 260;
+    W_0[9+(NY0) * 9] = 380;
     W_0[10+(NY0) * 10] = 120;
     W_0[11+(NY0) * 11] = 120;
     W_0[12+(NY0) * 12] = 120;
@@ -550,14 +550,14 @@ void crazyflie_acados_setup_nlp_in(crazyflie_solver_capsule* capsule, const int 
     // change only the non-zero elements:
     W[0+(NY) * 0] = 180;
     W[1+(NY) * 1] = 180;
-    W[2+(NY) * 2] = 260;
+    W[2+(NY) * 2] = 400;
     W[3+(NY) * 3] = 60;
     W[4+(NY) * 4] = 60;
     W[5+(NY) * 5] = 80;
     W[6+(NY) * 6] = 80;
     W[7+(NY) * 7] = 80;
     W[8+(NY) * 8] = 80;
-    W[9+(NY) * 9] = 260;
+    W[9+(NY) * 9] = 380;
     W[10+(NY) * 10] = 120;
     W[11+(NY) * 11] = 120;
     W[12+(NY) * 12] = 120;
@@ -615,19 +615,19 @@ void crazyflie_acados_setup_nlp_in(crazyflie_solver_capsule* capsule, const int 
 
     double* W_e = calloc(NYN*NYN, sizeof(double));
     // change only the non-zero elements:
-    W_e[0+(NYN) * 0] = 1800;
-    W_e[1+(NYN) * 1] = 1800;
-    W_e[2+(NYN) * 2] = 2600;
-    W_e[3+(NYN) * 3] = 600;
-    W_e[4+(NYN) * 4] = 600;
-    W_e[5+(NYN) * 5] = 800;
-    W_e[6+(NYN) * 6] = 800;
-    W_e[7+(NYN) * 7] = 800;
-    W_e[8+(NYN) * 8] = 800;
-    W_e[9+(NYN) * 9] = 2600;
-    W_e[10+(NYN) * 10] = 1200;
-    W_e[11+(NYN) * 11] = 1200;
-    W_e[12+(NYN) * 12] = 1200;
+    W_e[0+(NYN) * 0] = 4500;
+    W_e[1+(NYN) * 1] = 4500;
+    W_e[2+(NYN) * 2] = 10000;
+    W_e[3+(NYN) * 3] = 1500;
+    W_e[4+(NYN) * 4] = 1500;
+    W_e[5+(NYN) * 5] = 2000;
+    W_e[6+(NYN) * 6] = 2000;
+    W_e[7+(NYN) * 7] = 2000;
+    W_e[8+(NYN) * 8] = 2000;
+    W_e[9+(NYN) * 9] = 9500;
+    W_e[10+(NYN) * 10] = 3000;
+    W_e[11+(NYN) * 11] = 3000;
+    W_e[12+(NYN) * 12] = 3000;
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, N, "W", W_e);
     free(W_e);
     double* Vx_e = calloc(NYN*NX, sizeof(double));

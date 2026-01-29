@@ -279,17 +279,17 @@ class DisturbanceScenarios:
         # 5秒后施加一个短脉冲
         generator.add_pulse_disturbance(
             start_time=5.0,
-            duration=0.5,
-            force=[3.0, 0.0, 0.0],
-            torque=[0.0, 0.0, 2.0]
+            duration=40,
+            force=[4.0, 0.0, 0.0],
+            torque=[0.0, 0.0, 0.0]
         )
         
         # 10秒后施加一个正弦扰动
         generator.add_sine_disturbance(
             start_time=10.0,
-            duration=5.0,
-            amplitude_force=[5.0, 5.0, 0.0],
-            frequency=1.0
+            duration=40.0,
+            amplitude_torque=[0.0, 0.0, 0.2],
+            frequency=0.2
         )
         
     @staticmethod

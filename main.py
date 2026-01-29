@@ -4,9 +4,9 @@ import mujoco
 import mujoco.viewer as viewer 
 import numpy as np
 from os.path import abspath, dirname, join
-from nmpc_controller import NMPC_Controller
+from control.nmpc_controller import NMPC_Controller
 from trajectory_generator import TrajectoryGenerator
-from eso_observer import ESO_Observer
+from observer.eso_observer import ESO_Observer
 
 from model.config_loader import get_mode_config, get_value
 
@@ -91,6 +91,7 @@ eso_enable = True  # 默认启用ESO（可通过命令行参数修改）
 
 def control_callback(m, d):
     global log_count, gravity, mass, controller, trajectory_gen, eso, eso_enable, last_control_krpm, last_quat_main
+    global use_nominal_disturbance
 
     pos = d.qpos[:3]        # [x, y, z]
     quat = d.qpos[3:7]      # [qw, qx, qy, qz]
@@ -196,16 +197,25 @@ if __name__ == '__main__':
                         default=True, help='启用ESO扰动观测器（默认启用）')
     parser.add_argument('--no-eso', dest='eso_enable', action='store_false',
                         help='禁用ESO扰动观测器')
+    parser.add_argument('--use-nominal', dest='use_nominal', action='store_true',
+                        default=False,
+                        help='使用标称扰动(将实际扰动作为已知项提供给控制器,用于对比ESO效果)')
     
     args = parser.parse_args()
     
     # 设置全局ESO开关
     eso_enable = args.eso_enable
     
+    # 设置标称扰动选项
+    use_nominal_disturbance = args.use_nominal
+    
     print("="*80)
     print("🚁 八旋翼NMPC控制器 - 轨迹跟踪模式")
     print("="*80)
     print(f"\n【ESO扰动观测器】: {'✅ 启用' if eso_enable else '❌ 禁用'}")
+    print(f"【标称扰动补偿】: {'✅ 启用 (使用实际扰动)' if use_nominal_disturbance else '❌ 禁用'}")
+    if use_nominal_disturbance and eso_enable:
+        print("  ⚠️  注意: 标称扰动优先级高于ESO,ESO仅用于数据记录")
     print("\n【选择飞行模式】")
     print("  1 - 悬停模式 (Hover at 1.0m)")
     print("  2 - 画圆模式 (Circle)")

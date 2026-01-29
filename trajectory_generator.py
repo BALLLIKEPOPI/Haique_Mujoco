@@ -34,6 +34,12 @@ class TrajectoryGenerator:
         self.forward_speed = 0.5  # m/s
         self.forward_start_pos = self.hover_position.copy()
         
+        # 路径跟踪参数
+        self.waypoints = []  # 路径点列表
+        self.waypoint_index = 0  # 当前目标路径点索引
+        self.path_speed = 1.0  # 路径跟踪速度 (m/s)
+        self.waypoint_tolerance = 0.3  # 到达路径点的容差 (m)
+        
         # 平滑过渡参数
         self.transition_duration = 2.0  # 过渡时间（秒）
         self.transition_start_pos = None  # 过渡起始位置
@@ -42,7 +48,7 @@ class TrajectoryGenerator:
     
     def set_mode(self, mode):
         """切换轨迹模式"""
-        if mode in ['hover', 'circle', 'square', 'climb', 'forward']:
+        if mode in ['hover', 'circle', 'square', 'climb', 'forward', 'path']:
             self.mode = mode
             self.start_time = self.current_time
 
@@ -78,6 +84,12 @@ class TrajectoryGenerator:
             elif mode == 'forward':
                 print(f"  匀速前进: speed={self.forward_speed} m/s (沿 +X)")
                 print(f"  → 将平滑过渡到起点 (耗时{self.transition_duration}s)")
+            elif mode == 'path':
+                print(f"  路径跟踪: {len(self.waypoints)} 个路径点, 速度={self.path_speed} m/s")
+                if len(self.waypoints) > 0:
+                    print(f"  起点: {self.waypoints[0][:3]}")
+                    print(f"  终点: {self.waypoints[-1][:3]}")
+                    print(f"  → 将平滑过渡到轨迹起点 (耗时{self.transition_duration}s)")
         else:
             print(f"✗ 未知轨迹模式: {mode}")
     
@@ -459,3 +471,59 @@ class TrajectoryGenerator:
             self.forward_speed = float(speed)
         print(f"✓ 匀速前进参数: speed={self.forward_speed} m/s (沿 +X)")
 
+    
+    def set_waypoints(self, waypoints, speed=1.0):
+        """
+        设置路径跟踪的路径点
+        
+        参数:
+            waypoints: List of states (each state is [px, py, pz, ...])
+                      or List of positions (each is [x, y, z])
+            speed: 路径跟踪速度 (m/s)
+        """
+        self.waypoints = []
+        for wp in waypoints:
+            if len(wp) >= 3:
+                self.waypoints.append(np.array(wp))
+            else:
+                print(f"✗ 警告: 路径点维度不足: {wp}")
+        
+        self.waypoint_index = 0
+        self.path_speed = speed
+        
+        print(f"✓ 设置路径点: {len(self.waypoints)} 个节点, 速度={speed} m/s")
+        if len(self.waypoints) > 0:
+            print(f"  起点: {self.waypoints[0][:3]}")
+            print(f"  终点: {self.waypoints[-1][:3]}")
+    
+    def _path_tracking_trajectory(self):
+        """路径跟踪轨迹生成"""
+        if len(self.waypoints) == 0:
+            print("✗ 警告: 路径点列表为空，返回悬停位置")
+            return self.hover_position
+        
+        # 已完成所有路径点
+        if self.waypoint_index >= len(self.waypoints):
+            # 停在最后一个路径点
+            return self.waypoints[-1][:3]
+        
+        # 获取当前目标路径点
+        target_waypoint = self.waypoints[self.waypoint_index]
+        
+        # 检查是否到达当前路径点
+        current_pos = self.last_position
+        dist_to_waypoint = np.linalg.norm(current_pos - target_waypoint[:3])
+        
+        if dist_to_waypoint < self.waypoint_tolerance:
+            # 到达当前路径点，切换到下一个
+            self.waypoint_index += 1
+            print(f"  ✓ 到达路径点 [{self.waypoint_index}/{len(self.waypoints)}]")
+            
+            if self.waypoint_index >= len(self.waypoints):
+                print("  ✓ 完成所有路径点!")
+                return self.waypoints[-1][:3]
+            else:
+                target_waypoint = self.waypoints[self.waypoint_index]
+        
+        # 返回当前目标路径点位置
+        return target_waypoint[:3]

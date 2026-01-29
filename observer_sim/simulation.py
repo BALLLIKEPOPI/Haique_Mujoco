@@ -200,7 +200,7 @@ def create_test_disturbance():
 
 if __name__ == '__main__':
     # 运行仿真
-    csv_path = '../log/nmpc_data.csv'
+    csv_path = '../log/csv/nmpc_data.csv'
     
     if not os.path.exists(csv_path):
         print(f"❌ 找不到CSV文件: {csv_path}")

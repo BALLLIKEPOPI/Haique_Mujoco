@@ -558,7 +558,7 @@ class NMPC_Controller:
 
     # NMPC位置控制
     # goal_pos: 目标三维位置[x y z]
-    def nmpc_position_control(self, current_state, goal_pos, disturbance=None, goal_vel=None, goal_quat=None, goal_yaw_rate=None, actual_disturbance=None):
+    def nmpc_position_control(self, current_state, goal_pos, disturbance=None, goal_vel=None, goal_quat=None, goal_yaw_rate=None, actual_disturbance=None, servo_filtered=None):
         """
         位置控制
         
@@ -632,6 +632,14 @@ class NMPC_Controller:
             log_entry['actual_dist_force'] = np.zeros(3)
             log_entry['actual_dist_torque'] = np.zeros(3)
         
+        # 记录滤波后的舵机角度（如果有）
+        if servo_filtered is not None:
+            log_entry['servo_alpha_filt'] = float(servo_filtered[0])
+            log_entry['servo_beta_filt'] = float(servo_filtered[1])
+        else:
+            log_entry['servo_alpha_filt'] = float(control[8])
+            log_entry['servo_beta_filt'] = float(control[9])
+        
         self.data_log.append(log_entry)
         
         return _dt, control
@@ -655,7 +663,8 @@ class NMPC_Controller:
                      'dist_fx', 'dist_fy', 'dist_fz',
                      'dist_mx', 'dist_my', 'dist_mz',
                      'actual_dist_fx', 'actual_dist_fy', 'actual_dist_fz',
-                     'actual_dist_mx', 'actual_dist_my', 'actual_dist_mz']
+                     'actual_dist_mx', 'actual_dist_my', 'actual_dist_mz',
+                     'u_alpha_filt', 'u_beta_filt']
             writer.writerow(header)
             
             # 写入数据
@@ -672,6 +681,9 @@ class NMPC_Controller:
                 # 添加实际扰动
                 row.extend(data['actual_dist_force'])
                 row.extend(data['actual_dist_torque'])
+                # 添加滤波后舵机角度
+                row.append(data['servo_alpha_filt'])
+                row.append(data['servo_beta_filt'])
                 writer.writerow(row)
         
         print(f"✓ 数据已保存到: {filename} ({len(self.data_log)} 条记录)")

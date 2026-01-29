@@ -4,10 +4,10 @@ import mujoco
 import mujoco.viewer as viewer 
 import numpy as np
 from os.path import abspath, dirname, join
-from nmpc_controller_underwater import NMPC_Controller
+from control.nmpc_controller_underwater import NMPC_Controller
 from trajectory_generator import TrajectoryGenerator
-from eso_observer import ESO_Observer
-from disturbance_generator import DisturbanceGenerator, DisturbanceScenarios
+from observer.eso_observer import ESO_Observer
+from observer.disturbance_generator import DisturbanceGenerator, DisturbanceScenarios
 
 from model.config_loader import get_mode_config, get_value
 
@@ -129,6 +129,7 @@ servo_cmd_filt = np.array([
 def control_callback(m, d):
     global log_count, gravity, mass, controller, trajectory_gen, eso, eso_enable
     global last_nmpc_time, held_control, last_control_for_eso, last_quat_main, servo_cmd_filt
+    global use_nominal_disturbance
 
     pos = d.qpos[:3]        # [x, y, z]
     quat = d.qpos[3:7]      # [qw, qx, qy, qz]
@@ -177,10 +178,28 @@ def control_callback(m, d):
         else:
             eso_disturbance = None
 
+        # 选择扰动补偿方式：标称扰动 > ESO估计 > 无补偿
+        if use_nominal_disturbance and actual_disturbance is not None:
+            # 使用实际扰动作为已知项（标称扰动）
+            compensation_disturbance = actual_disturbance
+        elif eso_enable and eso_disturbance is not None:
+            # 使用ESO估计的扰动
+            compensation_disturbance = eso_disturbance
+        else:
+            # 不使用扰动补偿
+            compensation_disturbance = None
+
+        # 传递滤波后的舵机角度（去除offset）
+        servo_filtered_no_offset = np.array([
+            servo_cmd_filt[0] - left_servo_offset,
+            servo_cmd_filt[1] - right_servo_offset,
+        ])
+        
         _solve_dt, new_control = controller.nmpc_position_control(
-            current_state, goal_position, eso_disturbance, 
+            current_state, goal_position, compensation_disturbance, 
             goal_vel=goal_velocity, goal_quat=goal_quat, goal_yaw_rate=goal_yaw_rate,
-            actual_disturbance=actual_disturbance
+            actual_disturbance=actual_disturbance,
+            servo_filtered=servo_filtered_no_offset
         )
         held_control = new_control.copy()
         last_control_for_eso = held_control.copy()
@@ -280,11 +299,19 @@ if __name__ == '__main__':
     parser.add_argument('--disturbance', type=str, default=None,
                         choices=['mild', 'moderate', 'severe', 'random'],
                         help='启用外部扰动场景 (mild/moderate/severe/random)')
+    parser.add_argument('--use-nominal', dest='use_nominal', action='store_true',
+                        default=False,
+                        help='使用标称扰动(将实际扰动作为已知项提供给控制器,用于对比ESO效果)')
+    parser.add_argument('--rrt-plan', type=str, default=None, metavar='X,Y,Z',
+                        help='使用RRT规划器规划到指定目标点的路径 (格式: x,y,z, 例如: --rrt-plan 2,2,1)')
     
     args = parser.parse_args()
     
     # 设置全局ESO开关
     eso_enable = args.eso_enable
+    
+    # 设置标称扰动选项
+    use_nominal_disturbance = args.use_nominal
     
     # 设置扰动生成器（修改全局变量）
     if args.disturbance is not None:
@@ -309,6 +336,9 @@ if __name__ == '__main__':
     print("="*80)
     print(f"\n【ESO扰动观测器】: {'✅ 启用' if eso_enable else '❌ 禁用'}")
     print(f"【外部扰动】: {'✅ 启用 (' + args.disturbance + ')' if disturbance_enable else '❌ 禁用'}")
+    print(f"【标称扰动补偿】: {'✅ 启用 (使用实际扰动)' if use_nominal_disturbance else '❌ 禁用'}")
+    if use_nominal_disturbance and eso_enable:
+        print("  ⚠️  注意: 标称扰动优先级高于ESO,ESO仅用于数据记录")
     print("\n【选择飞行模式】")
     print("  1 - 悬停模式 (Hover at 1.0m)")
     print("  2 - 画圆模式 (Circle)")
@@ -401,8 +431,8 @@ if __name__ == '__main__':
     finally:
         # 保存数据
         print("\n正在保存飞行数据...")
-        controller.save_data('./log/csv/nmpc_data.csv')
-        print("✓ NMPC数据已保存到 ./log/csv/nmpc_data.csv")
+        controller.save_data('./log/csv/nmpc_underwater_data.csv')
+        print("✓ NMPC数据已保存到 ./log/csv/nmpc_underwater_data.csv")
         
         if eso_enable:
             eso.save_disturbance_log('./log/eso_disturbance_log.csv')
