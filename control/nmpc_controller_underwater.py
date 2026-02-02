@@ -306,7 +306,7 @@ class NMPC_Controller:
         self.yaw_offset = 0.0  # 累积的2π偏移量
 
         # 调试开关：True 时打印参考信息（高频打印会明显拖慢仿真）
-        self.debug = True
+        self.debug = False
         
         # 构建编译OCP求解器
         self.acados_solver = AcadosOcpSolver(self.ocp, json_file = 'acados_ocp.json')
@@ -637,6 +637,7 @@ class NMPC_Controller:
             log_entry['servo_alpha_filt'] = float(servo_filtered[0])
             log_entry['servo_beta_filt'] = float(servo_filtered[1])
         else:
+            # 如果没有滤波后的值，使用NMPC原始输出
             log_entry['servo_alpha_filt'] = float(control[8])
             log_entry['servo_beta_filt'] = float(control[9])
         
@@ -659,12 +660,12 @@ class NMPC_Controller:
                      'vx', 'vy', 'vz', 'wx', 'wy', 'wz',
                      'goal_x', 'goal_y', 'goal_z',
                      'u1', 'u2', 'u3', 'u4', 'u5', 'u6', 'u7', 'u8', 'u_alpha', 'u_beta',
+                     'u_alpha_filt', 'u_beta_filt',
                      'solve_time',
                      'dist_fx', 'dist_fy', 'dist_fz',
                      'dist_mx', 'dist_my', 'dist_mz',
                      'actual_dist_fx', 'actual_dist_fy', 'actual_dist_fz',
-                     'actual_dist_mx', 'actual_dist_my', 'actual_dist_mz',
-                     'u_alpha_filt', 'u_beta_filt']
+                     'actual_dist_mx', 'actual_dist_my', 'actual_dist_mz']
             writer.writerow(header)
             
             # 写入数据
@@ -674,6 +675,9 @@ class NMPC_Controller:
                 row.extend(data['state'])
                 row.extend(data['goal'])
                 row.extend(data['control'])
+                # 添加滤波后舵机角度
+                row.append(data.get('servo_alpha_filt', data['control'][8]))
+                row.append(data.get('servo_beta_filt', data['control'][9]))
                 row.append(data['solve_time'])
                 # 添加ESO扰动估计
                 row.extend(data['dist_force'])
@@ -681,9 +685,6 @@ class NMPC_Controller:
                 # 添加实际扰动
                 row.extend(data['actual_dist_force'])
                 row.extend(data['actual_dist_torque'])
-                # 添加滤波后舵机角度
-                row.append(data['servo_alpha_filt'])
-                row.append(data['servo_beta_filt'])
                 writer.writerow(row)
         
         print(f"✓ 数据已保存到: {filename} ({len(self.data_log)} 条记录)")

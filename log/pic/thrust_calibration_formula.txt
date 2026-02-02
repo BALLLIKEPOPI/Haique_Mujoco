@@ -1,0 +1,23 @@
+============================================================
+Thrust Sensor Calibration Formula
+============================================================
+
+Linear Fitting Model:
+  actual_weight(g) = -0.427275 × sensor_value + -14.5858
+
+Fitting Quality:
+  R² (coefficient of determination) = 0.99846386
+  RMSE (root mean square error) = 33.5142 g
+
+Usage:
+  sensor_value = <sensor reading>
+  actual_weight_g = -0.427275 * sensor_value + -14.5858
+
+Convert to Newtons (N):
+  force_N = actual_weight_g * 9.8 / 1000
+  force_N = (-0.427275 * sensor_value + -14.5858) * 0.0098
+
+Simplified Formula (direct output in Newtons):
+  force_N = -0.00418729 * sensor_value + -0.142941
+
+============================================================

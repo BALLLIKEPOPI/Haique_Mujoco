@@ -5,9 +5,11 @@ import mujoco.viewer as viewer
 import numpy as np
 from os.path import abspath, dirname, join
 from control.nmpc_controller_underwater import NMPC_Controller
+from control.pid_controller_underwater import PIDControllerUnderwater
 from trajectory_generator import TrajectoryGenerator
 from observer.eso_observer import ESO_Observer
 from observer.disturbance_generator import DisturbanceGenerator, DisturbanceScenarios
+from controller_state_machine import ControllerStateMachine
 
 from model.config_loader import get_mode_config, get_value
 
@@ -18,11 +20,26 @@ CFG = get_mode_config("underwater", path=CONFIG_PATH)
 left_servo_offset = float(get_value(CFG, "servo.left_offset", -0.1))
 right_servo_offset = float(get_value(CFG, "servo.right_offset", 0.0))
 
+# 状态机和双控制器（用于HOVER/MOTION模式切换）
+state_machine = None
+aerial_ctrl = None
+
+# 尝试导入aerial控制器（用于HOVER模式）
+try:
+    from control.nmpc_controller import NMPC_Controller as AerialController
+    HAS_AERIAL_CTRL = True
+except ImportError:
+    HAS_AERIAL_CTRL = False
+    AerialController = None
+
 # 新建NMPC控制器（将舵机安装偏置传入控制器，使“pi/2”对应物理舵机角）
-controller = NMPC_Controller(
+controller = None
+
+# 临时保持兼容性：默认创建NMPC控制器（如果不通过main函数运行）
+default_controller = NMPC_Controller(
     left_servo_offset=left_servo_offset,
     right_servo_offset=right_servo_offset,
-    config_path=CONFIG_PATH,
+    config_path=CONFIG_PATH
 )
 
 # 新建轨迹生成器
@@ -40,6 +57,17 @@ max_torque = float(get_value(CFG, "sim.max_torque", 0.02))
 
 # 控制周期（NMPC/ESO 的离散时间假设）
 control_dt = float(get_value(CFG, "sim.control_dt", 0.01))
+
+# Aerial控制器参数（用于HOVER模式）
+if HAS_AERIAL_CTRL:
+    Ct_aerial = 0.1757  # Crazyflie的推力系数
+    max_thrust_aerial = 17.75
+    max_speed_aerial = 15.0
+    k_yaw = 0.15  # yaw分配系数
+else:
+    Ct_aerial = Ct
+    max_thrust_aerial = max_thrust
+    max_speed_aerial = 30.0
 
 # 舵机指令整形：NMPC 的输出会有高频微抖，直接给 MuJoCo position actuator 会激发振荡。
 # 这里做最小处理：一阶低通 + 速率限制（单位：rad, rad/s）。
@@ -59,6 +87,13 @@ eso = ESO_Observer(
 def calc_motor_force(krpm):
     global Ct
     return Ct * krpm * np.abs(krpm)
+
+# 根据电机转速计算电机归一化输入（aerial模式）
+def calc_motor_input_aerial(krpm):
+    global Ct_aerial, max_thrust_aerial, max_speed_aerial
+    krpm = np.clip(krpm, 0.0, max_speed_aerial)
+    force = Ct_aerial * krpm**2
+    return np.clip(force / max_thrust_aerial, 0.0, 1.0)
 
 # 根据电机转速计算电机归一化输入
 # 偶数索引电机（0,2,4,6）保持单向推力，奇数索引电机允许反向（-1~1）
@@ -129,7 +164,7 @@ servo_cmd_filt = np.array([
 def control_callback(m, d):
     global log_count, gravity, mass, controller, trajectory_gen, eso, eso_enable
     global last_nmpc_time, held_control, last_control_for_eso, last_quat_main, servo_cmd_filt
-    global use_nominal_disturbance
+    global use_nominal_disturbance, state_machine, aerial_ctrl
 
     pos = d.qpos[:3]        # [x, y, z]
     quat = d.qpos[3:7]      # [qw, qx, qy, qz]
@@ -154,8 +189,10 @@ def control_callback(m, d):
         last_nmpc_time = float(d.time)
 
         # 从轨迹生成器获取目标位置 + 速度前馈 + yaw + yaw_rate
-        goal_position, goal_velocity, goal_yaw, goal_yaw_rate = trajectory_gen.get_reference_state(d.time)
-        
+        goal_position, goal_velocity, goal_yaw, goal_yaw_rate = trajectory_gen.get_reference_state(d.time)        
+        # 更新状态机
+        if state_machine is not None:
+            state_machine.update(goal_velocity)
         # 将yaw转换为四元数
         def yaw_to_quat(yaw):
             half_yaw = yaw / 2.0
@@ -195,12 +232,67 @@ def control_callback(m, d):
             servo_cmd_filt[1] - right_servo_offset,
         ])
         
-        _solve_dt, new_control = controller.nmpc_position_control(
-            current_state, goal_position, compensation_disturbance, 
-            goal_vel=goal_velocity, goal_quat=goal_quat, goal_yaw_rate=goal_yaw_rate,
-            actual_disturbance=actual_disturbance,
-            servo_filtered=servo_filtered_no_offset
-        )
+        # _solve_dt, new_control = controller.nmpc_position_control(
+        #     current_state, goal_position, compensation_disturbance, 
+        #     goal_vel=goal_velocity, goal_quat=goal_quat, goal_yaw_rate=goal_yaw_rate,
+        #     actual_disturbance=actual_disturbance,
+        #     servo_filtered=servo_filtered_no_offset
+        # )
+        # 根据状态机选择控制器
+        mode = state_machine.current_state if state_machine is not None else ControllerStateMachine.STATE_MOTION
+        
+        if mode == ControllerStateMachine.STATE_HOVER and HAS_AERIAL_CTRL and aerial_ctrl is not None:
+            # HOVER模式：使用aerial控制器
+            _solve_dt, u_aerial = aerial_ctrl.nmpc_position_control(
+                current_state=current_state,
+                goal_pos=goal_position,
+                goal_vel=goal_velocity,
+                goal_quat=goal_quat,
+                disturbance=compensation_disturbance
+            )
+            
+            # 将4组电机输出转换为8个电机（带yaw差分）
+            yaw_bias = float(u_aerial[4])
+            motor_speeds_hover = np.array([
+                u_aerial[0] * (1 - k_yaw * yaw_bias),  # motor0: Front上,CW
+                u_aerial[1] * (1 + k_yaw * yaw_bias),  # motor1: Left上,CCW
+                u_aerial[2] * (1 - k_yaw * yaw_bias),  # motor2: Rear上,CW
+                u_aerial[3] * (1 + k_yaw * yaw_bias),  # motor3: Right上,CCW
+                u_aerial[0] * (1 + k_yaw * yaw_bias),  # motor4: Front下,CCW
+                u_aerial[1] * (1 - k_yaw * yaw_bias),  # motor5: Left下,CW
+                u_aerial[2] * (1 + k_yaw * yaw_bias),  # motor6: Rear下,CCW
+                u_aerial[3] * (1 - k_yaw * yaw_bias),  # motor7: Right下,CW
+            ])
+            motor_speeds_hover = np.clip(motor_speeds_hover, 0.0, max_speed_aerial)
+            
+            # 组装完整控制量（8个电机 + 2个舵机）
+            new_control = np.concatenate([motor_speeds_hover, [
+                left_servo_offset,
+                right_servo_offset
+            ]])
+        
+        elif isinstance(controller, PIDControllerUnderwater):
+            # PID控制器：使用run方法
+            # 构建目标状态: [px, py, pz, quat, vx, vy, vz, wx, wy, wz]
+            target_state = np.concatenate([
+                goal_position,      # 位置 (3)
+                goal_quat,          # 姿态四元数 (4)
+                goal_velocity,      # 速度 (3) - 重要！用于前馈控制
+                np.zeros(3)         # 角速度 (3)
+            ])
+            new_control = controller.run(current_state, target_state)
+            _solve_dt = 0.0  # PID没有求解时间
+        else:
+            # NMPC控制器：使用nmpc_position_control方法
+            _solve_dt, new_control = controller.nmpc_position_control(
+                current_state=current_state,
+                goal_pos=goal_position,
+                disturbance=compensation_disturbance,
+                goal_vel=goal_velocity,
+                goal_quat=goal_quat,
+                goal_yaw_rate=goal_yaw_rate,
+                actual_disturbance=actual_disturbance
+            )
         held_control = new_control.copy()
         last_control_for_eso = held_control.copy()
 
@@ -230,9 +322,16 @@ def control_callback(m, d):
         d.xfrc_applied[1, :3] = dist['force']   # body 1 是无人机主体
         d.xfrc_applied[1, 3:] = dist['torque']
     
-    # 应用电机控制
-    for i in range(8):
-        d.actuator(f'prop_motor{i}').ctrl[0] = calc_motor_input(motor_speeds[i], i)
+    # 应用电机控制（根据模式选择不同的输入函数）
+    current_mode = state_machine.current_state if state_machine is not None else ControllerStateMachine.STATE_MOTION
+    if current_mode == ControllerStateMachine.STATE_HOVER:
+        # Aerial模式：所有电机使用单向输入
+        for i in range(8):
+            d.actuator(f'prop_motor{i}').ctrl[0] = calc_motor_input_aerial(motor_speeds[i])
+    else:
+        # Underwater模式：偶数单向，奇数双向
+        for i in range(8):
+            d.actuator(f'prop_motor{i}').ctrl[0] = calc_motor_input(motor_speeds[i], i)
 
     # ---- 舵机指令整形：低通 + 限速 + 夹到 joint range ----
     servo_des = np.array([
@@ -292,6 +391,9 @@ if __name__ == '__main__':
     )
     parser.add_argument('mode', type=str, nargs='?', default=None,
                         help='飞行模式 (1-6)')
+    parser.add_argument('--controller', type=str, default='nmpc',
+                        choices=['nmpc', 'pid'],
+                        help='控制器类型: nmpc(默认) 或 pid')
     parser.add_argument('--eso', dest='eso_enable', action='store_true', 
                         default=True, help='启用ESO扰动观测器（默认启用）')
     parser.add_argument('--no-eso', dest='eso_enable', action='store_false',
@@ -302,10 +404,36 @@ if __name__ == '__main__':
     parser.add_argument('--use-nominal', dest='use_nominal', action='store_true',
                         default=False,
                         help='使用标称扰动(将实际扰动作为已知项提供给控制器,用于对比ESO效果)')
-    parser.add_argument('--rrt-plan', type=str, default=None, metavar='X,Y,Z',
-                        help='使用RRT规划器规划到指定目标点的路径 (格式: x,y,z, 例如: --rrt-plan 2,2,1)')
-    
+
     args = parser.parse_args()
+
+    if args.controller == 'pid':
+        print("\n🎮 使用 PID 控制器")
+        controller = PIDControllerUnderwater(config_path=CONFIG_PATH)
+    else:  # 'nmpc'
+        print("\n🎮 使用 NMPC 控制器")
+        controller = NMPC_Controller(
+            left_servo_offset=left_servo_offset,
+            right_servo_offset=right_servo_offset,
+            config_path=CONFIG_PATH
+        )
+    
+    # 初始化状态机
+    state_machine = ControllerStateMachine(
+        vel_threshold=0.05,
+        hysteresis_time=0.3,
+        dt=control_dt
+    )
+    print(f"\n🔄 状态机已初始化 (vel_threshold=0.05, hysteresis=0.3s)")
+    
+    # 初始化aerial控制器（用于HOVER模式）
+    if HAS_AERIAL_CTRL:
+        try:
+            aerial_ctrl = AerialController(config_path=CONFIG_PATH)
+            print("✓ Aerial控制器已加载 (HOVER模式)")
+        except Exception as e:
+            aerial_ctrl = None
+            print(f"⚠️ Aerial控制器加载失败: {e}")
     
     # 设置全局ESO开关
     eso_enable = args.eso_enable
@@ -431,8 +559,10 @@ if __name__ == '__main__':
     finally:
         # 保存数据
         print("\n正在保存飞行数据...")
-        controller.save_data('./log/csv/nmpc_underwater_data.csv')
-        print("✓ NMPC数据已保存到 ./log/csv/nmpc_underwater_data.csv")
+        if isinstance(controller, PIDControllerUnderwater):
+            controller.save_data('./log/csv/pid_underwater_data.csv')
+        else:
+            controller.save_data('./log/csv/nmpc_underwater_data.csv')
         
         if eso_enable:
             eso.save_disturbance_log('./log/eso_disturbance_log.csv')

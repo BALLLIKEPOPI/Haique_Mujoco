@@ -33,13 +33,7 @@ class TrajectoryGenerator:
         # 匀速前进参数（沿 +X 方向）
         self.forward_speed = 0.5  # m/s
         self.forward_start_pos = self.hover_position.copy()
-        
-        # 路径跟踪参数
-        self.waypoints = []  # 路径点列表
-        self.waypoint_index = 0  # 当前目标路径点索引
-        self.path_speed = 1.0  # 路径跟踪速度 (m/s)
-        self.waypoint_tolerance = 0.3  # 到达路径点的容差 (m)
-        
+
         # 平滑过渡参数
         self.transition_duration = 2.0  # 过渡时间（秒）
         self.transition_start_pos = None  # 过渡起始位置
@@ -48,7 +42,7 @@ class TrajectoryGenerator:
     
     def set_mode(self, mode):
         """切换轨迹模式"""
-        if mode in ['hover', 'circle', 'square', 'climb', 'forward', 'path']:
+        if mode in ['hover', 'circle', 'square', 'climb', 'forward']:
             self.mode = mode
             self.start_time = self.current_time
 
@@ -84,12 +78,6 @@ class TrajectoryGenerator:
             elif mode == 'forward':
                 print(f"  匀速前进: speed={self.forward_speed} m/s (沿 +X)")
                 print(f"  → 将平滑过渡到起点 (耗时{self.transition_duration}s)")
-            elif mode == 'path':
-                print(f"  路径跟踪: {len(self.waypoints)} 个路径点, 速度={self.path_speed} m/s")
-                if len(self.waypoints) > 0:
-                    print(f"  起点: {self.waypoints[0][:3]}")
-                    print(f"  终点: {self.waypoints[-1][:3]}")
-                    print(f"  → 将平滑过渡到轨迹起点 (耗时{self.transition_duration}s)")
         else:
             print(f"✗ 未知轨迹模式: {mode}")
     
@@ -167,10 +155,13 @@ class TrajectoryGenerator:
         # 过渡期位置用插值；速度和角速度前馈在过渡期置零，避免目标跳变
         final_pos = self._apply_transition(target_pos)
         if self._elapsed_motion_time() < self.transition_duration:
-            # 调试：降低打印频率
+            # 调试：使用静态变量控制打印频率（每0.5秒打印一次）
             elapsed = self._elapsed_motion_time()
-            if int(elapsed * 200) % 200 == 0:
+            if not hasattr(self, '_last_print_time'):
+                self._last_print_time = -1.0
+            if elapsed - self._last_print_time >= 0.5 or self._last_print_time < 0:
                 print(f"过渡阶段 {elapsed:.1f}/{self.transition_duration}s")
+                self._last_print_time = elapsed
             final_vel = np.zeros(3)
             final_yaw_rate = 0.0
         else:
