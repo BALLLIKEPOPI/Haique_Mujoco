@@ -1,5 +1,9 @@
 ## ACADOS NMPC Quadrotor Position Control Demo
 
+## Project Documentation
+
+- Project file/folder guide: PROJECT_FILE_GUIDE.md
+
 ## 物理模型
 
 ```python
