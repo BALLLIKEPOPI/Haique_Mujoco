@@ -1,7 +1,7 @@
 <mujoco model="haique_urdf_gen4">
   <!-- Default settings inspired by CF2 quadrotor -->
-  <!-- <option integrator="RK4" density="1.225" viscosity="1.8e-5" timestep="0.002"/> -->
-  <option integrator="implicitfast" density="1000" viscosity="0.001" timestep="0.002"/>
+  <option integrator="RK4" density="1.225" viscosity="1.8e-5" timestep="0.002"/>
+  <!-- <option integrator="implicitfast" density="1000" viscosity="0.001" timestep="0.002"/> -->
   <compiler angle="radian" inertiafromgeom="false" meshdir="/home/popi/haique_urdf_gen4/Quadrotor-NMPC-Control_copy/robots/meshes/" autolimits="true"/>
 
   <default>

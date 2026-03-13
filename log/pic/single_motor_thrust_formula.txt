@@ -1,0 +1,19 @@
+Single Motor - Thrust - Quadratic Fitting Formula
+============================================================
+
+F(RPM) = a·RPM² + b·RPM + c
+
+Coefficients:
+  a = 2.4008576036e-07 N/rpm²
+  b = -4.1093300575e-04 N/rpm
+  c = 3.6187355061e-01 N
+
+Goodness of Fit: R² = 0.99809864
+Root Mean Square Error: RMSE = 130.1367 mN (13.2657 g)
+
+Python Code:
+def thrust_N(rpm):
+    return 2.4008576036e-07 * rpm**2 + -4.1093300575e-04 * rpm + 3.6187355061e-01
+
+def thrust_g(rpm):
+    return thrust_N(rpm) / 0.00981

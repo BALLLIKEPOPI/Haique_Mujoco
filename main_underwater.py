@@ -166,7 +166,11 @@ def control_callback(m, d):
     global last_nmpc_time, held_control, last_control_for_eso, last_quat_main, servo_cmd_filt
     global use_nominal_disturbance, state_machine, aerial_ctrl
 
+    # 初始化变量防止UnboundLocalError
+    eso_disturbance = None
+    actual_disturbance = None
     pos = d.qpos[:3]        # [x, y, z]
+
     quat = d.qpos[3:7]      # [qw, qx, qy, qz]
     vel = d.qvel[:3]        # [vx, vy, vz]
     omega = d.qvel[3:6]     # [wx, wy, wz]
@@ -270,6 +274,24 @@ def control_callback(m, d):
                 left_servo_offset,
                 right_servo_offset
             ]])
+            
+            # 记录HOVER模式数据到主controller（确保数据完整性）
+            if hasattr(controller, 'data_log'):
+                import time
+                log_entry = {
+                    'time': time.time(),
+                    'state': current_state.copy(),
+                    'goal': goal_position.copy(),
+                    'control': new_control.copy(),
+                    'solve_time': _solve_dt,
+                    'dist_force': compensation_disturbance['force'].copy() if compensation_disturbance else np.zeros(3),
+                    'dist_torque': compensation_disturbance['torque'].copy() if compensation_disturbance else np.zeros(3),
+                    'actual_dist_force': actual_disturbance['force'].copy() if actual_disturbance else np.zeros(3),
+                    'actual_dist_torque': actual_disturbance['torque'].copy() if actual_disturbance else np.zeros(3),
+                    'servo_alpha_filt': float(new_control[8]),
+                    'servo_beta_filt': float(new_control[9])
+                }
+                controller.data_log.append(log_entry)
         
         elif isinstance(controller, PIDControllerUnderwater):
             # PID控制器：使用run方法

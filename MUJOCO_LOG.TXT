@@ -1,0 +1,9 @@
+Mon Mar  9 14:57:02 2026
+WARNING: OpenGL error 0x500 in or before mjr_makeContext
+
+Mon Mar  9 14:57:03 2026
+WARNING: OpenGL error 0x500 in or before mjr_makeContext
+
+Mon Mar  9 15:32:12 2026
+WARNING: OpenGL error 0x500 in or before mjr_makeContext
+

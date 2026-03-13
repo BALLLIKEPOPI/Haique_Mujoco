@@ -1,0 +1,19 @@
+Dual Motor - Thrust - Quadratic Fitting Formula
+============================================================
+
+F(RPM) = a·RPM² + b·RPM + c
+
+Coefficients:
+  a = 3.6031590093e-07 N/rpm²
+  b = -1.8528102869e-04 N/rpm
+  c = 9.7012326170e-02 N
+
+Goodness of Fit: R² = 0.99983118
+Root Mean Square Error: RMSE = 72.0928 mN (7.3489 g)
+
+Python Code:
+def thrust_N(rpm):
+    return 3.6031590093e-07 * rpm**2 + -1.8528102869e-04 * rpm + 9.7012326170e-02
+
+def thrust_g(rpm):
+    return thrust_N(rpm) / 0.00981

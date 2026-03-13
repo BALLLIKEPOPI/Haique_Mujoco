@@ -49,9 +49,9 @@ class PIDControllerUnderwater:
         
         # [位置环] (Position -> Accel)
         # Z轴积分 (Ki) 至关重要，因为只有4个电机提供升力，模型误差可能较大
-        self.kp_pos = np.array([18.0, 15.0, 20.0])  
-        self.ki_pos = np.array([2.0, 2.0, 6.0])   
-        self.kd_pos = np.array([5.0, 4.5, 8.0])
+        self.kp_pos = np.array([18.0, 15.0, 50.0])  
+        self.ki_pos = np.array([2.0, 2.0, 15.0])   
+        self.kd_pos = np.array([5.0, 4.5, 80.0])
 
         # [姿态环] (Angle -> Rate)
         self.kp_att = np.array([6.0, 12.0, 10.0])  # Roll↓(舵机慢), Pitch保持, Yaw↑(需更强保持)
@@ -59,12 +59,17 @@ class PIDControllerUnderwater:
         # [角速度环] (Rate -> Torque) - 刚度层
         # Roll (靠舵机): 响应可能稍慢，给大一点的 P
         # Yaw (靠推力): 响应快
-        self.kp_rate = np.array([20.0, 25.0, 30.0])  # Roll↓(减少超调), Pitch保持, Yaw↑(更快响应)
-        self.ki_rate = np.array([0.3, 0.2, 0.5])  # Roll↓, Pitch保持, Yaw↑(抵消漂移)
+        self.kp_rate = np.array([20.0, 25.0, 20.0])  # Roll↓(减少超调), Pitch保持, Yaw↑(更快响应)
+        self.ki_rate = np.array([0.5, 0.2, 0.8])  # Roll↓, Pitch保持, Yaw↑(抵消漂移)
         self.kd_rate = np.array([6.0, 2.0, 2.5])  # Roll↑↑(增加阻尼), Pitch保持, Yaw↑
 
         self.int_err_pos = np.zeros(3)
         self.int_err_rate = np.zeros(3)
+        
+        # 电机输出低通滤波器
+        self.motor_output_filtered = np.zeros(8)  # u0-u7的滤波状态
+        self.motor_filter_tau = 0.02  # 时间常数50ms (截止频率约3.2Hz)
+        
         self.data_log = []
 
     def run(self, current_state: np.ndarray, target_state: np.ndarray, dt: float = None):
@@ -79,7 +84,12 @@ class PIDControllerUnderwater:
         
         target_pos = target_state[0:3]
         target_vel = target_state[7:10] if len(target_state) >= 10 else np.zeros(3)  # 提取目标速度
-        target_yaw = 0.0 
+        vel_magnitude = np.linalg.norm(target_vel[:2])
+        if vel_magnitude > 0.1:  # 速度>0.1m/s时朝运动方向
+            target_yaw = np.arctan2(target_vel[1], target_vel[0])
+        else:
+            target_yaw = 0.0  # 静止时保持0度
+        print(target_yaw)
         
         r = R.from_quat([curr_quat[1], curr_quat[2], curr_quat[3], curr_quat[0]])
         R_matrix = r.as_matrix()
@@ -109,6 +119,12 @@ class PIDControllerUnderwater:
             if att_err[i] > np.pi: att_err[i] -= 2*np.pi
             if att_err[i] < -np.pi: att_err[i] += 2*np.pi
             
+        # Roll死区: ±2°
+        roll_deadzone = np.deg2rad(1.0)  # 0.0349 rad
+        for i in range(3):
+            if abs(att_err[i]) < roll_deadzone:
+                att_err[i] = 0.0
+
         rate_des = np.clip(self.kp_att * att_err, -2.5, 2.5)
         rate_err = rate_des - curr_omega
         
@@ -155,7 +171,7 @@ class PIDControllerUnderwater:
         # [Roll Tx] -> 左右差速倾转 (舵机主导) + 推力辅助
         # 倾转电机的推力差也能辅助Roll (力矩臂 ~0.3m)
         u_roll = abs(Tx / (2.0 * 0.3))
-        print(u_surge, u_yaw, u_roll)
+        # print(u_surge, u_yaw, u_roll)
         
         # 舵机角度控制 (主要Roll控制)
         # 0度是水平。
@@ -164,7 +180,7 @@ class PIDControllerUnderwater:
         # Need Left Lift Up, Right Lift Down.
         # Left Servo: +alpha (Up). Right Servo: -alpha (Down).
         # 增益需要大，因为 tilt 产生的垂直分力是 F*sin(alpha)
-        roll_gain = -0.4 # 映射力矩到角度 (负号: Tx>0右滚→左舵机减小角度)
+        roll_gain = -0.04 # 映射力矩到角度 (负号: Tx>0右滚→左舵机减小角度)
         servo_roll_cmd = np.clip(Tx * roll_gain, -0.5, 0.5)
         
         # --- 组装 ---
@@ -176,17 +192,30 @@ class PIDControllerUnderwater:
         u[2] = u_heave + u_pitch
         u[6] = u_heave + u_pitch
         
-        # Tilt Group (Left/Right): Surge + Yaw + Roll辅助
-        # Left: Surge - Yaw + Roll (增加推力辅助左滚)
-        u[1] = u_surge - u_yaw + u_roll
-        u[5] = u_surge - u_yaw + u_roll
-        # Right: Surge + Yaw - Roll (减少推力辅助右滚)
-        u[3] = u_surge + u_yaw + u_roll
-        u[7] = u_surge + u_yaw + u_roll
+        # # Tilt Group (Left/Right): Surge + Yaw + Roll辅助
+        # # Left: Surge - Yaw + Roll (增加推力辅助左滚)
+        # u[1] = u_surge - 0.5 * u_yaw + 0.3 * u_roll
+        # u[5] = u_surge - 0.5 * u_yaw + 0.3 * u_roll
+        # # Right: Surge + 0.5 * Yaw - 0.3 * Roll (减少推力辅助右滚)
+        # u[3] = u_surge + 0.5 * u_yaw + 0.3 * u_roll
+        # u[7] = u_surge + 0.5 * u_yaw + 0.3 * u_roll
+        u_surge = np.clip(u_surge, 0, self.max_thrust/4.0)  # Surge推力限制
+
+        u[1] = 0.5 * u_roll - 0.1 * u_yaw + 0.3 * u_surge
+        u[5] = 0.5 * u_roll - 0.1 * u_yaw + 0.3 * u_surge
+        # Righ 3 5 Roll (减少推力0.3 * 
+        u[3] = 0.5 * u_roll + 0.1 * u_yaw + 0.3 * u_surge
+        u[7] = 0.5 * u_roll + 0.1 * u_yaw + 0.3 * u_surge
+        print(u_surge, u_yaw, u_roll)
         
         u[:8] = np.clip(u[:8], 0.0, self.max_thrust)
         
-        # Servos: Roll control via Tilt
+        # 电机输出低通滤波 (一阶滤波器)
+        alpha = self.dt / (self.dt + self.motor_filter_tau)
+        self.motor_output_filtered = alpha * u[:8] + (1 - alpha) * self.motor_output_filtered
+        u[:8] = self.motor_output_filtered
+        
+        # # Servos: Roll control via Tilt
         # Left: +gamma, Right: -gamma
         base_tilt = 1.57 
         u[8] = (base_tilt + servo_roll_cmd) - self.left_offset

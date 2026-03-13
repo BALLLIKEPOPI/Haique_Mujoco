@@ -56,6 +56,7 @@ class ControllerStateMachine:
             target_state = self.STATE_HORIZONTAL_MOVE
         else:
             target_state = self.STATE_HOVER
+            # target_state = self.STATE_HORIZONTAL_MOVE
         
         state_changed = False
         
